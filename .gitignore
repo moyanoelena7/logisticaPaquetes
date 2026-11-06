@@ -1,0 +1,22 @@
+# Java / Maven
+target/
+*.jar
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Secretos y config local
+.env
+
+# Datos pesados de OSRM
+*.osm.pbf
+*.osrm*
+
+# Varios
+*.log
+.DS_Store
