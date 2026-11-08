@@ -2,3 +2,6 @@ services:
   mariadb-db:
     ports:
       - "3307:3306"
+  keycloak:
+    ports:
+      - "8180:8080"

@@ -1,0 +1,45 @@
+{
+  "realm": "logistica",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "ADMINISTRADOR", "description": "Gestiona paquetes, flota, envios y rutas" },
+      { "name": "REPARTIDOR", "description": "Consulta rutas asignadas y registra entregas" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "logistica-api",
+      "name": "Logistica API (Postman y pruebas)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.logistica",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "Logistica",
+      "email": "admin@logistica.local",
+      "credentials": [{ "type": "password", "value": "admin123", "temporary": false }],
+      "realmRoles": ["ADMINISTRADOR"]
+    },
+    {
+      "username": "repartidor.logistica",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Repartidor",
+      "lastName": "Logistica",
+      "email": "repartidor@logistica.local",
+      "credentials": [{ "type": "password", "value": "repartidor123", "temporary": false }],
+      "realmRoles": ["REPARTIDOR"]
+    }
+  ]
+}
