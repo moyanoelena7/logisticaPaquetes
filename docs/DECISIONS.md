@@ -99,13 +99,13 @@ Se dividirán en los siguientes microservicios:
 - Administrador → Sistema de Logística de Paquetes: Gestiona la operación logística, administra recursos y planifica envíos [HTTPS].
 - Repartidor → Sistema de Logística de Paquetes: Consulta los recorridos asignados y registra el estado o resultado de las entregas [HTTPS].
 - Sistema de Logística de Paquetes → OSRM: Solicita el cálculo de rutas y distancias para optimizar los recorridos, recibiendo los tiempos estimados como respuesta [HTTP/JSON].
-- Sistema de Logística de Paquetes → Keycloak: Valida tokens y permisos (OIDC / JWT).
+- API Gateway y microservicios → Keycloak: validan localmente los JWT con las claves públicas publicadas por JWKS; Keycloak emite los tokens y administra usuarios y roles.
 
 # Diagrama de contenedor C4
 
 ### Componentes
 
-- API Gateway: punto de entrada y filtro para las solicitudes consultando Keycloak si el usuario tiene autorización. Las enruta a ms-paquetes o ms-logistica.
+- API Gateway: punto de entrada que valida los JWT recibidos y enruta las solicitudes a ms-paquetes o ms-logistica. Los microservicios vuelven a validar los tokens y aplican los permisos por operación.
 - ms-paquetes: administra la información de paquetes, clientes, vehículos, repartidores y sucursales.
 - ms-logistica: coordina la creación y planificación de envíos, asigna recursos, calcula rutas y registra el seguimiento operativo y los resultados de entrega.
 - Base de datos de ms-paquetes: almacena los datos que administra ese microservicio, como paquetes, vehículos, repartidores y sucursales.
@@ -116,7 +116,7 @@ Se dividirán en los siguientes microservicios:
 ### Relaciones
 - El Administrador envía solicitudes por HTTPS al API Gateway para gestionar información y planificar envíos.
 - El Repartidor accede mediante HTTPS al gateway para consultar su recorrido y registrar resultados.
-- El API Gateway deriva las solicitudes a los endpoints de ms-paquetes o ms-logistica, mediante APIs HTTP/REST.
+- El API Gateway deriva las solicitudes a los endpoints de ms-paquetes o ms-logistica mediante APIs HTTP/REST. En la configuración actual, autentica las solicitudes y cada microservicio aplica la autorización por roles.
 - ms-logistica consulta a ms-paquetes los datos que necesita para planificar, como paquetes, vehículos y disponibilidad de repartidores.
 - ms-logistica solicita a OSRM el cálculo de rutas y recibe los resultados.
 - ms-paquetes lee y guarda su información en su base de datos.
@@ -140,9 +140,9 @@ Se dividirán en los siguientes microservicios:
 | ms-paquetes | Repartidor | POST | `/repartidores` | Registrar repartidor | Administrador |
 | ms-paquetes | Repartidor | GET | `/repartidores?disponible=true` | Consultar repartidores disponibles | Administrador |
 | ms-paquetes | Repartidor | PUT | `/repartidores/{id}` | Actualizar datos de repartidor | Administrador |
-| ms-paquetes | Sucursal | GET | `/sucursal` | Obtener la sucursal | Administrador |
-| ms-paquetes | Sucursal | POST | `/sucursal` | Registrar sucursal | Administrador |
-| ms-paquetes | Sucursal | PUT | `/sucursal` | actualiza datos de la sucursal | Administrador |
+| ms-paquetes | Sucursales | GET | `/sucursales` | Consultar sucursales | Administrador |
+| ms-paquetes | Sucursales | POST | `/sucursales` | Registrar sucursal | Administrador |
+| ms-paquetes | Sucursales | PUT | `/sucursales` | Actualizar datos de sucursales | Administrador |
 | ms-logistica | Envío | GET | `/envios?sector={sector}` | Buscar envios por sector | Administrador |
 | ms-logistica | Envío | GET | `/envios?estado={estado}` | Buscar envios por estado | Administrador |
 | ms-logistica | Envío | GET | `/envios/{id}` | Consultar un envío específico | Administrador o repartidor |
@@ -162,43 +162,65 @@ Para el MVP no se implementará una librería común. ms-paquetes y ms-logistica
 La gestión de paquetes, vehículos, repartidores y sucursales permanecerá en ms-paquetes. La lógica de asignación, planificación de rutas y gestión de entregas permanecerá en ms-logistica. Esta separación evita que un microservicio dependa del código interno del otro. Si en el futuro aparece una necesidad concreta de reutilización, se evaluará crear una librería versionada con componentes pequeños y estables.
 
 ## Implementación y Verificación
-El sistema utilizará Key Cloak como proveedor de identidad para autenticar a los usuarios. Al iniciar sesión, el usuario obtendrá un token de acceso que deberá incluir en las solicitudes a los recursos protegidos.
-Se definirán dos roles:
-Administrador: podrá gestionar paquetes, sucursales, vehículos y repartidores, y organizar envíos, asignaciones y rutas.
-Repartidor: podrá consultar los envíos y rutas que tiene asignados y registrar los resultados de la entrega
-El API Gateway y los microservicios validarán el token y comprobarán que el usuario tenga el rol requerido para cada operación. Una solicitud sin un token válido recibirá 401 Unauthorized. Si el usuario está autenticado, pero no tiene el rol necesario, recibirá 403 Forbidden.
 
-### Comprobaciones
+### Seguridad configurada
 
-Camino exitoso: el usuario con rol de administrador registra un paquete y el sistema devuelve “paquete registrado exitosamente”
+Keycloak es el proveedor de identidad del sistema. El realm `logistica` define los roles `ADMINISTRADOR` y `REPARTIDOR`, y emite tokens JWT.
 
-Camino sin éxito: el usuario con rol de repartidor intenta registrar un vehículo y el sistema responde con 403 Forbidden.
+- El API Gateway actúa como Resource Server: valida el JWT y exige autenticación para las solicitudes enrutadas. La comprobación de la firma usa el endpoint JWKS interno de Keycloak; el claim `iss` se valida contra el issuer publicado por el realm.
+- `ms-paquetes` y `ms-logistica` también actúan como Resource Servers y validan los JWT de forma independiente. Los microservicios aplican los permisos por método HTTP y ruta.
+- Los roles del realm se leen desde `realm_access.roles` y se convierten a autoridades `ROLE_ADMINISTRADOR` y `ROLE_REPARTIDOR`.
+- En `ms-paquetes`, la administración de paquetes, vehículos, repartidores y sucursales requiere `ADMINISTRADOR`. La consulta de un paquete por ID permite ambos roles.
+- En `ms-logistica`, la creación de envíos, las asignaciones y el cálculo de rutas requieren `ADMINISTRADOR`. El inicio del reparto y el registro del resultado de entrega requieren `REPARTIDOR`. Las consultas de un envío o su ruta permiten ambos roles.
+- Una solicitud sin token válido debe recibir `401 Unauthorized`; un usuario autenticado sin el rol requerido debe recibir `403 Forbidden`. Las rutas no declaradas en las reglas de los microservicios se deniegan.
+
+Las reglas actuales verifican roles, pero todavía no verifican que el envío consultado o actualizado esté asignado al repartidor autenticado. Esa autorización sobre el recurso debe implementarse en la lógica de `ms-logistica` cuando existan las entidades y relaciones del dominio. Del mismo modo, `ms-paquetes` todavía no vincula una identidad de Keycloak con la entidad Repartidor.
+
+### Estado de implementación
+
+La configuración de seguridad, el enrutamiento del gateway, la conexión a MariaDB y la importación del realm de Keycloak están configurados. Se comprobó manualmente el acceso con un token de administrador a través del gateway. La matriz completa de casos `401`, `403` y accesos permitidos debe volver a comprobarse cuando estén implementados los endpoints reales.
+
+La tabla de APIs de esta sección define el contrato comprometido, no endpoints ya implementados. Actualmente los módulos todavía no contienen entidades, repositorios, servicios ni controladores de negocio.
+
+### Comprobaciones comprometidas
+
+- Camino permitido: un usuario con rol de administrador registra un paquete y recibe una respuesta de éxito.
+- Camino rechazado: un usuario con rol de repartidor intenta registrar un vehículo y recibe `403 Forbidden`.
+- También se comprobará que una solicitud sin token válido reciba `401 Unauthorized` y que un repartidor solo pueda consultar y operar los envíos que tenga asignados. Estas verificaciones requieren implementar los controladores y las reglas de negocio correspondientes.
 
 ## Tecnologías
 
-1. Tecnologías y versiones principales El desarrollo del backend estará sustentado en el ecosistema Java y un motor relacional de alto rendimiento:
-    - Lenguaje y Framework Principal: Java (versión 21+) utilizando Spring Boot. Se emplea para construir el API Gateway (con Spring Cloud Gateway) y los microservicios (ms-paquetes y ms-logistica).
-    - Gestión de dependencias y construcción: Maven, utilizado también para empaquetar como un archivo .jar hacia los microservicios. 
-    - Persistencia: MariaDB (12.3.3 LTS) como motor relacional, interactuando a través de Spring Data JPA (Hibernate) mediante el driver mariadb-java-client. Se administrarán dos bases de datos lógicas independientes (bd_paquetes y bd_logistica) para garantizar el aislamiento de dominios entre microservicios.
-2. Dependencias de infraestructura y servicios externos Los componentes de infraestructura se ejecutarán en contenedores aislados:
-    - Keycloak (Identity and Access Management): Servidor de autenticación externo para emisión y verificación de tokens JWT mediante OAuth2/OIDC y gestión de roles. 
-    - Motor de Base de Datos: Instancia del servidor MariaDB hospedando de forma independiente las bases de datos bd_paquetes y bd_logistica. 
-    - OSRM (Open Source Routing Machine): Servicio externo integrado mediante peticiones HTTP/JSON para el cálculo de rutas y tiempos de recorrido.
-3. Configuración por entorno: la configuración del sistema se gestionará mediante perfiles de Spring Boot (application-dev.yml, application-prod.yml), externalizando parámetros sensibles mediante variables de entorno:
-    - Variables clave inyectadas: Cadena de conexión JDBC de MariaDB (jdbc:mariadb://...), credenciales de acceso, URL del servidor de
-    - Keycloak para los filtros de Spring Security, puerto de exposición y endpoint base de la API externa de OSRM.
-4. Procedimiento de arranque de la solución: toda la solución estará orquestada con Docker y Docker Compose para permitir el despliegue del backend completo mediante un único comando. El archivo docker-compose.yml en la raíz definirá los servicios: api-gateway, ms-paquetes, ms-logistica, mariadb-db y keycloak.
+- Lenguaje: Java 21.
+- Framework: Spring Boot 4.1.2 en los tres módulos. El API Gateway utiliza Spring Cloud Gateway Server WebFlux con Spring Cloud BOM 2025.1.4.
+- Construcción: Maven y Maven Wrapper; cada módulo genera una imagen Docker multi-stage.
+- Microservicios MVC: Spring WebMVC, Spring Data JPA, Hibernate, validación, Actuator y OAuth2 Resource Server.
+- Persistencia: MariaDB 11.8, con bases lógicas independientes `bd_paquetes` y `bd_logistica`. La misma instancia aloja `bd_keycloak` para Keycloak.
+- Identidad: Keycloak 26.4, con el realm `logistica` importado desde `infra/keycloak/realm-logistica.json`.
+- Ruteo: OSRM es un servicio externo previsto para la integración. No está definido como servicio en el Docker Compose actual y su desarrollo/configuración de ejecución corresponde al integrante asignado. `ms-logistica` lee su URL desde `OSRM_URL`; en Docker debe configurarse con una dirección alcanzable desde el contenedor, no con `localhost` salvo que OSRM corra dentro de ese mismo contenedor.
 
-### Instrucciones de ejecución:
+### Configuración por entorno
 
-1. Clonar el repositorio y ubicarse en la carpeta raíz. 
-2. Configurar el archivo .env local tomando como referencia el archivo .env.example. 
-3. Ejecutar en la terminal el comando: docker-compose up --build -d
-4. Compose compilará los microservicios Java (usando construcciones multi-stage con Maven) e iniciará la instancia de MariaDB ejecutando los scripts de inicialización .sql para crear las bases de datos bd_paquetes y bd_logistica. 
-5. Una vez levantados los servicios, el API Gateway estará listo en el puerto configurado (ej. http://localhost:8080) para recibir solicitudes y enrutarlas con los filtros de seguridad de Keycloak.
+Cada módulo tiene un `application.yml` y recibe la configuración de ejecución mediante variables de entorno. No existen actualmente archivos `application-dev.yml` ni `application-prod.yml`; la configuración local se orquesta con Docker Compose y `.env`.
 
-## Colección de ejecutables
-1. Herramienta y Organización de la Colección La entrega se realizará mediante un archivo JSON exportado de Postman (Colección v2.1) acompañado de un archivo de entorno (entorno-logistica-local.json). La colección estará estructurada en carpetas numeradas para garantizar un flujo lógico de ejecución que refleje el proceso principal del negocio:
+- `.env.example` enumera las variables locales requeridas. Cada integrante crea su propio `.env`; `.env` está excluido de Git.
+- Compose configura las conexiones JDBC y credenciales de MariaDB, el issuer/JWKS de Keycloak y las URLs internas entre servicios.
+- `MS_PAQUETES_URL` y `MS_LOGISTICA_URL` deben usar los nombres DNS de los servicios dentro de Docker (`ms-paquetes:8081` y `ms-logistica:8082`).
+- El issuer JWT configurado es `http://localhost:8180/realms/logistica`; los contenedores obtienen las claves por `http://keycloak:8080/realms/logistica/protocol/openid-connect/certs`.
+- `spring.jpa.hibernate.ddl-auto` está configurado como `update` para desarrollo local; antes de un entorno productivo deberá definirse una estrategia de migraciones y validación de esquema.
+
+### Procedimiento de arranque local
+
+Desde la raíz del repositorio:
+
+1. Crear `.env` tomando `.env.example` como referencia.
+2. Ejecutar `docker compose up --build -d`.
+3. Esperar a que las aplicaciones terminen de iniciar y comprobar sus logs. Compose espera a que MariaDB esté saludable, pero no tiene healthchecks para los microservicios ni el gateway.
+4. Usar el gateway en `http://localhost:8080`. Los puertos locales publicados para desarrollo son `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak) y `3307` (MariaDB), definidos en `docker-compose.override.yml`.
+
+El script `infra/mariadb/init/01-crear-bases.sql` crea las tres bases lógicas. Los servicios de aplicación usan las bases asignadas a sus dominios; Keycloak usa `bd_keycloak`.
+
+## Colección de ejecutables (planificada)
+1. Herramienta y organización previstas: la entrega se realizará mediante un archivo JSON exportado de Postman (Colección v2.1) acompañado de un archivo de entorno (entorno-logistica-local.json). Estos artefactos todavía no están incluidos en el repositorio. La colección estará estructurada en carpetas numeradas para garantizar un flujo lógico de ejecución que refleje el proceso principal del negocio:
     - 00 - Autenticación (Keycloak)
     - 01 - Setup y Datos Iniciales (ms-paquetes)
     - 02 - Proceso Principal MVP (ms-logistica)
@@ -216,7 +238,7 @@ Camino sin éxito: el usuario con rol de repartidor intenta registrar un vehícu
     - Escenarios Negativos (Reglas de Negocio e Integraciones)
         - Validación de Capacidad (Regla de negocio): Intento de asignar al {{id_vehiculo}} una carga de paquetes que supere su capacidad_peso o capacidad_volumen. La API debe retornar un código de error de negocio (ej. HTTP 400 Bad Request) detallando la restricción. 
         - Validación de Mínimo de Paquetes (Regla de negocio): Intento de planificar un envío en un sector que posee solo 4 o 5 paquetes. La API debe retornar un error indicando que no se cumple la restricción mínima de 6 paquetes.
-       Fallo de Autorización (Keycloak): Utilizar la variable {{repartidor_token}} para intentar consumir un endpoint administrativo, como registrar una nueva sucursal (POST /sucursal). El API Gateway o microservicio debe retornar HTTP 403 Forbidden. 
+       Fallo de Autorización (Keycloak): Utilizar la variable {{repartidor_token}} para intentar consumir un endpoint administrativo, como registrar una nueva sucursal (POST /sucursales). `ms-paquetes` debe retornar HTTP 403 Forbidden. 
         - Asignación de Recursos no disponibles: Intentar asignar a un envío un repartidor o vehículo cuyo atributo disponible se encuentre en false. El sistema deberá rechazar la petición con un error 422 Unprocessable Entity, ya que viola una regla de negocio del dominio (“Solo se pueden asignar recursos disponibles”)
 
 ## Compromiso del equipo
