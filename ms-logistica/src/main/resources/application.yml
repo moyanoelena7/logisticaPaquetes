@@ -1,0 +1,26 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: ms-logistica
+  datasource:
+    url: ${DB_URL:jdbc:mariadb://localhost:3307/bd_logistica}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+app:
+  ms-paquetes:
+    base-url: ${MS_PAQUETES_URL:http://localhost:8081}
+  osrm:
+    base-url: ${OSRM_URL:http://localhost:5000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

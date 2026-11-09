@@ -1,0 +1,25 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: ms-paquetes
+              uri: ${MS_PAQUETES_URL:http://localhost:8081}
+              predicates:
+                - Path=/paquetes/**, /vehiculos/**, /repartidores/**, /sucursales/**
+            - id: ms-logistica
+              uri: ${MS_LOGISTICA_URL:http://localhost:8082}
+              predicates:
+                - Path=/envios/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

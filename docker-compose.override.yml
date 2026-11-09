@@ -5,3 +5,12 @@ services:
   keycloak:
     ports:
       - "8180:8080"
+  ms-paquetes:
+    ports:
+      - "8081:8081"
+  ms-logistica:
+    ports:
+      - "8082:8082"
+  api-gateway:
+    ports:
+      - "8080:8080"
