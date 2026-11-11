@@ -181,12 +181,11 @@ Los tokens duran unos 5 minutos. Si aparece un 401 de golpe, pedí uno nuevo.
 - **`main`** es la rama estable. Siempre debe levantar con `docker compose up --build -d`. Está protegida: no se sube directo, solo por Pull Request.
 - Cada integrante trabaja en su propia rama, creada desde `main` actualizado:
 
-| Rama | Responsable | Carpeta |
+| Rama | Carpeta |
 |---|---|---|
-| `feature/ms-paquetes` | _(nombre)_ | `ms-paquetes/` |
-| `feature/ms-logistica` | _(nombre)_ | `ms-logistica/` (y OSRM) |
+| `feature/ms-paquetes` | `ms-paquetes/` |
+| `feature/ms-logistica` | `ms-logistica/` (y OSRM) |
 
-Para trabajos puntuales usá el prefijo según el tipo: `feature/...`, `fix/...`, `docs/...`, `chore/...`.
 
 ### Empezar a trabajar
 
@@ -207,7 +206,7 @@ git branch --show-current
 ```powershell
 git add .
 git status                       # revisá qué se va a subir
-git commit -m "feat(ms-paquetes): alta de vehiculos"
+git commit -m ""
 git push
 ```
 
@@ -218,17 +217,7 @@ git fetch origin
 git merge origin/main
 ```
 
-### Commits
 
-Formato `tipo(alcance): descripción en minúsculas`.
-
-| Tipo | Uso |
-|---|---|
-| `feat` | funcionalidad nueva |
-| `fix` | corrección de un error |
-| `docs` | documentación |
-| `chore` | configuración, infraestructura, dependencias |
-| `test` | pruebas |
 
 ### Pull Requests
 
