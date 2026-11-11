@@ -46,9 +46,12 @@ services:
     container_name: ms-paquetes
     restart: unless-stopped
     environment:
-      DB_URL: jdbc:mariadb://mariadb-db:3306/bd_paquetes
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb-db:3306/bd_paquetes
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.mariadb.jdbc.Driver
+      KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
     depends_on:
       mariadb-db:
         condition: service_healthy
@@ -62,10 +65,13 @@ services:
     container_name: ms-logistica
     restart: unless-stopped
     environment:
-      DB_URL: jdbc:mariadb://mariadb-db:3306/bd_logistica
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb-db:3306/bd_logistica
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       MS_PAQUETES_URL: http://ms-paquetes:8081
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.mariadb.jdbc.Driver
+      KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
     depends_on:
       mariadb-db:
         condition: service_healthy
@@ -80,14 +86,15 @@ services:
       dockerfile: Dockerfile
     container_name: api-gateway
     restart: unless-stopped
-    ports:
-      - "8080:8080"
     environment:
+      KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
       MS_PAQUETES_URL: http://ms-paquetes:8081
       MS_LOGISTICA_URL: http://ms-logistica:8082
     depends_on:
       - ms-paquetes
       - ms-logistica
+      - keycloak
     networks:
       - logistica-net
 
