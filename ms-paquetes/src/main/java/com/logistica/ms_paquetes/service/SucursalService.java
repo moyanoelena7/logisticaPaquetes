@@ -6,6 +6,7 @@ import com.logistica.ms_paquetes.domain.Sucursal;
 import com.logistica.ms_paquetes.dto.SucursalRequest;
 import com.logistica.ms_paquetes.dto.SucursalResponse;
 import com.logistica.ms_paquetes.exception.RecursoNoEncontradoException;
+import com.logistica.ms_paquetes.exception.ReglaNegocioException;
 import com.logistica.ms_paquetes.repository.SucursalRepository;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -59,5 +60,16 @@ public class SucursalService {
         s.setDireccion(req.direccion().trim());
         s.setLatitud(req.latitud());
         s.setLongitud(req.longitud());
+    }
+    /** Para entidades que referencian una sucursal desde el cuerpo de la petición: 422 si no sirve. */
+    @Transactional(readOnly = true)
+    public Sucursal obtenerAsignable(Long sucursalId) {
+        Sucursal sucursal = repository.findById(sucursalId)
+                .orElseThrow(() -> new ReglaNegocioException(
+                        "La sucursal con id " + sucursalId + " no existe"));
+        if (!sucursal.isActivo()) {
+            throw new ReglaNegocioException("La sucursal con id " + sucursalId + " está desactivada");
+        }
+        return sucursal;
     }
 }

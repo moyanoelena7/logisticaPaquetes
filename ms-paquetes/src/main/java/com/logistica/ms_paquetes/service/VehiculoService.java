@@ -4,13 +4,12 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
-import com.logistica.ms_paquetes.domain.Sucursal;
+
 import com.logistica.ms_paquetes.domain.Vehiculo;
 import com.logistica.ms_paquetes.dto.VehiculoRequest;
 import com.logistica.ms_paquetes.dto.VehiculoResponse;
 import com.logistica.ms_paquetes.exception.RecursoNoEncontradoException;
 import com.logistica.ms_paquetes.exception.ReglaNegocioException;
-import com.logistica.ms_paquetes.repository.SucursalRepository;
 import com.logistica.ms_paquetes.repository.VehiculoRepository;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +20,7 @@ import lombok.RequiredArgsConstructor;
 public class VehiculoService {
 
     private final VehiculoRepository repository;
-    private final SucursalRepository sucursalRepository;
+    private final SucursalService sucursalService;
 
     @Transactional
     public VehiculoResponse crear(VehiculoRequest req) {
@@ -30,7 +29,7 @@ public class VehiculoService {
             throw new ReglaNegocioException("Ya existe un vehículo con la patente " + patente);
         }
         Vehiculo vehiculo = new Vehiculo();
-        vehiculo.setSucursal(sucursalAsignable(req.sucursalId()));
+        vehiculo.setSucursal(sucursalService.obtenerAsignable(req.sucursalId()));
         aplicar(vehiculo, req, patente);
         return VehiculoResponse.from(repository.save(vehiculo));
     }
@@ -57,7 +56,7 @@ public class VehiculoService {
         }
         // Solo se valida la sucursal si el vehículo cambia de sucursal.
         if (!vehiculo.getSucursal().getId().equals(req.sucursalId())) {
-            vehiculo.setSucursal(sucursalAsignable(req.sucursalId()));
+            vehiculo.setSucursal(sucursalService.obtenerAsignable(req.sucursalId()));
         }
         aplicar(vehiculo, req, patente);
         return VehiculoResponse.from(vehiculo);
@@ -75,16 +74,7 @@ public class VehiculoService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Vehículo", id));
     }
 
-    /** La sucursal viene en el cuerpo: si no existe o está desactivada es una regla de negocio (422). */
-    private Sucursal sucursalAsignable(Long sucursalId) {
-        Sucursal sucursal = sucursalRepository.findById(sucursalId)
-                .orElseThrow(() -> new ReglaNegocioException(
-                        "La sucursal con id " + sucursalId + " no existe"));
-        if (!sucursal.isActivo()) {
-            throw new ReglaNegocioException("La sucursal con id " + sucursalId + " está desactivada");
-        }
-        return sucursal;
-    }
+   
 
     private void aplicar(Vehiculo v, VehiculoRequest req, String patente) {
         v.setPatente(patente);
