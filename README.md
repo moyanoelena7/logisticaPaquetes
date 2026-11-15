@@ -197,7 +197,7 @@ Los tokens duran unos 5 minutos. Si aparece un 401 de golpe, pedí uno nuevo.
 | Sin token, o token inválido o vencido | `401 Unauthorized` |
 | Token válido pero sin el rol requerido | `403 Forbidden` |
 
-**Regla del equipo:** cada endpoint nuevo debe agregarse a la lista de reglas del `ResourceServerConfig` de su servicio con el rol que corresponde según la tabla de APIs. Lo que no esté listado queda accesible para cualquier usuario autenticado.
+**Regla del equipo:** cada endpoint nuevo debe agregarse a la lista de reglas del `ResourceServerConfig` de su servicio con el rol que corresponde según la tabla de APIs. Lo que no esté listado queda **denegado** (`anyRequest().denyAll()`): un endpoint sin regla responde `403` aunque el usuario esté autenticado. Si un endpoint nuevo da `403` con el rol correcto, lo primero que hay que revisar es que esté en esa lista.
 
 ---
 
