@@ -196,7 +196,7 @@ La tabla de APIs de esta sección define el contrato comprometido, no endpoints 
 - Microservicios MVC: Spring WebMVC, Spring Data JPA, Hibernate, validación, Actuator y OAuth2 Resource Server.
 - Persistencia: MariaDB 11.8, con bases lógicas independientes `bd_paquetes` y `bd_logistica`. La misma instancia aloja `bd_keycloak` para Keycloak.
 - Identidad: Keycloak 26.4, con el realm `logistica` importado desde `infra/keycloak/realm-logistica.json`.
-- Ruteo: OSRM es un servicio externo previsto para la integración. No está definido como servicio en el Docker Compose actual y su desarrollo/configuración de ejecución corresponde al integrante asignado. `ms-logistica` lee su URL desde `OSRM_URL`; en Docker debe configurarse con una dirección alcanzable desde el contenedor, no con `localhost` salvo que OSRM corra dentro de ese mismo contenedor.
+- Ruteo: OSRM se ejecuta como el servicio `osrm` de Docker Compose con la imagen oficial `ghcr.io/project-osrm/osrm-backend:v6.0.0` y algoritmo MLD. Se levanta con el profile `osrm` (`docker compose --profile osrm up -d`) para que `docker compose up` siga funcionando en equipos que no descargaron el mapa. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`, que descarga el extracto de OSM de la provincia de Córdoba (~40 MB) y ejecuta `osrm-extract`, `osrm-partition` y `osrm-customize` dentro de la misma imagen; el resultado (`cordoba.osrm*`, ~200 MB) queda en `ms-logistica/osrm/data/` y no se versiona. `ms-logistica` lee su URL desde `OSRM_URL`: en Docker se configura como `http://osrm:5000`, alcanzable por nombre de servicio; fuera de Docker el valor por defecto `http://localhost:5000` funciona porque el puerto se publica en el override. La etiqueta de la imagen y la del script deben coincidir, porque los archivos `.osrm.*` son binarios dependientes de la versión.
 
 ### Configuración por entorno
 
@@ -205,6 +205,7 @@ Cada módulo tiene un `application.yml` y recibe la configuración de ejecución
 - `.env.example` enumera las variables locales requeridas. Cada integrante crea su propio `.env`; `.env` está excluido de Git.
 - Compose configura las conexiones JDBC y credenciales de MariaDB, el issuer/JWKS de Keycloak y las URLs internas entre servicios.
 - `MS_PAQUETES_URL` y `MS_LOGISTICA_URL` deben usar los nombres DNS de los servicios dentro de Docker (`ms-paquetes:8081` y `ms-logistica:8082`).
+- `OSRM_URL` debe apuntar a `http://osrm:5000` dentro de Docker. Fuera de Docker, `application.yml` usa `http://localhost:5000`, que funciona porque `docker-compose.override.yml` publica el puerto 5000. El servicio `osrm` no arranca con `docker compose up`: depende del profile `osrm` y de tener los datos de mapa preparados.
 - El issuer JWT configurado es `http://localhost:8180/realms/logistica`; los contenedores obtienen las claves por `http://keycloak:8080/realms/logistica/protocol/openid-connect/certs`.
 - `spring.jpa.hibernate.ddl-auto` está configurado como `update` para desarrollo local; antes de un entorno productivo deberá definirse una estrategia de migraciones y validación de esquema.
 
@@ -214,8 +215,9 @@ Desde la raíz del repositorio:
 
 1. Crear `.env` tomando `.env.example` como referencia.
 2. Ejecutar `docker compose up --build -d`.
-3. Esperar a que las aplicaciones terminen de iniciar y comprobar sus logs. Compose espera a que MariaDB esté saludable, pero no tiene healthchecks para los microservicios ni el gateway.
-4. Usar el gateway en `http://localhost:8080`. Los puertos locales publicados para desarrollo son `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak) y `3307` (MariaDB), definidos en `docker-compose.override.yml`.
+3. Si se van a probar rutas, preparar los datos una vez (`ms-logistica\osrm\prepare.ps1`) y levantar `docker compose --profile osrm up -d`.
+4. Esperar a que las aplicaciones terminen de iniciar y comprobar sus logs. Compose espera a que MariaDB esté saludable, pero no tiene healthchecks para los microservicios ni el gateway.
+5. Usar el gateway en `http://localhost:8080`. Los puertos locales publicados para desarrollo son `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak), `3307` (MariaDB) y `5000` (OSRM), definidos en `docker-compose.override.yml`.
 
 El script `infra/mariadb/init/01-crear-bases.sql` crea las tres bases lógicas. Los servicios de aplicación usan las bases asignadas a sus dominios; Keycloak usa `bd_keycloak`.
 

@@ -72,11 +72,29 @@ services:
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.mariadb.jdbc.Driver
       KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
+      OSRM_URL: http://osrm:5000
     depends_on:
       mariadb-db:
         condition: service_healthy
       ms-paquetes:
         condition: service_started
+      osrm:
+        condition: service_started
+        required: false
+    networks:
+      - logistica-net
+
+  # Cálculo de rutas. Requiere los datos generados con ms-logistica/osrm/prepare.ps1
+  # y se levanta solo con --profile osrm, para que `docker compose up` siga
+  # funcionando en equipos que no tienen el mapa descargado.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    container_name: osrm
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld /data/cordoba.osrm
+    volumes:
+      - ./ms-logistica/osrm/data:/data
+    profiles: ["osrm"]
     networks:
       - logistica-net
 

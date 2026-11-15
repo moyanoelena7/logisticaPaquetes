@@ -12,7 +12,7 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 - Aún no hay entidades, repositorios, servicios, controladores ni cliente HTTP para ms-paquetes u OSRM.
 - application.yml define puerto 8082, conexión a bd_logistica, JWT, app.ms-paquetes.base-url y app.osrm.base-url.
 - Docker Compose configura MS_PAQUETES_URL=http://ms-paquetes:8081 y las URLs de issuer/JWKS.
-- OSRM no está definido como contenedor en Compose; su implementación e infraestructura pertenecen al integrante asignado.
+- OSRM se ejecuta como el servicio `osrm` de Docker Compose (imagen `ghcr.io/project-osrm/osrm-backend:v6.0.0`, algoritmo MLD) detrás del profile `osrm`. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`. Dentro de Docker, `OSRM_URL` es `http://osrm:5000`. Todavía no hay cliente HTTP ni lógica de rutas en el código de `ms-logistica`.
 - El gateway enruta /envios/** a ms-logistica. En desarrollo se publican los puertos de gateway y microservicios.
 - MariaDB tiene bases lógicas separadas: bd_paquetes, bd_logistica y bd_keycloak.
 
@@ -114,12 +114,14 @@ Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a err
 
 ## Integración OSRM
 
-La implementa el integrante responsable de OSRM. Coordinar con esa persona:
+El servicio ya está definido en Compose y la URL se configura por `OSRM_URL` / `app.osrm.base-url` (`http://osrm:5000` dentro de Docker; `http://localhost:5000` fuera). Datos: extracto de la provincia de Córdoba con el perfil `car.lua` y algoritmo MLD.
 
-- La URL se configura por OSRM_URL/app.osrm.base-url.
-- Dentro de Docker, localhost apunta al propio contenedor; OSRM_URL debe ser alcanzable desde la red Docker.
-- Formato y orden de coordenadas, perfil de ruteo, distancia, duración, geometría y errores.
-- Validación de todos los destinos y persistencia del orden de paradas.
+Contrato a respetar:
+
+- Endpoints HTTP/JSON: `/route/v1/driving/{coords}` para una ruta con orden fijo, `/trip/v1/driving/{coords}` para optimizar el orden de visita (TSP) y `/table/v1/driving/{coords}` para matrices de distancia/duración. La ruta optimizada del envío se obtiene con `trip` (o un orden propio) y se confirma con `route`.
+- Coordenadas en formato `longitud,latitud;longitud,latitud` — al revés que en los mapas. Invertirlas devuelve `NoSegment`.
+- Usar `overview=full&geometries=geojson` para obtener la geometría que se persiste en `RutaPlanificada`; `distance` sale en metros y `duration` en segundos.
+- Cualquier punto fuera de la provincia de Córdoba no tiene red: validar los destinos antes de planificar.
 - Timeout, respuesta inválida y caída externa sin dejar una ruta parcialmente válida.
 - No enviar credenciales ni JWT de usuario a OSRM.
 
@@ -142,7 +144,7 @@ Usar SLF4J con el ID de envío y operación cuando corresponda. No registrar JWT
 - Conservar puerto 8082 y nombre ms-logistica.
 - Dentro de Docker, ms-paquetes debe resolverse como http://ms-paquetes:8081.
 - Mantener KEYCLOAK_ISSUER_URI y KEYCLOAK_JWK_SET_URI de Compose.
-- Configurar OSRM_URL cuando el servicio externo esté disponible desde Docker.
+- `OSRM_URL` ya está configurada en Compose como `http://osrm:5000`; fuera de Docker el `application.yml` usa `http://localhost:5000` (puerto publicado en el override). El servicio `osrm` requiere `docker compose --profile osrm up -d` y los datos de `ms-logistica/osrm/prepare.ps1`.
 - Usar bd_logistica y credenciales inyectadas desde el .env local.
 - ddl-auto:update es una facilidad de desarrollo; acordar migraciones/validación de esquema antes de producción.
 - Actuator expone health e info, pero la seguridad actual solo permite health. Decidir si info queda restringido o se deja de exponer.

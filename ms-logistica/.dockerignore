@@ -2,3 +2,6 @@
 .git/
 .idea/
 .vscode/
+
+# Datos de OSRM: ~200 MB que no deben enviarse al daemon en cada build
+osrm/data/
