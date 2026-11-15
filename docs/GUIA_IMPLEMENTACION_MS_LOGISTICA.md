@@ -6,10 +6,11 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 
 ## Estado actual del repositorio
 
-- feature/seguridad ya contiene la base de JWT.
+- La rama `feature/ms-logistica` incluye la seguridad JWT y el CRUD de `ms-paquetes` incorporado desde `main`.
 - ms-logistica usa Java 21, Spring Boot 4.1.2, Spring MVC, Spring Data JPA, MariaDB y OAuth2 Resource Server.
 - Existen MsLogisticaApplication y config/SecurityConfig.
-- Aún no hay entidades, repositorios, servicios, controladores ni cliente HTTP para ms-paquetes u OSRM.
+- En `ms-logistica` aún faltan entidades, repositorios, servicios, controladores y clientes HTTP. `ms-paquetes` ya permite cambiar el estado de un paquete individual. Queda pendiente la reserva conjunta de la carga y la flota.
+- El catálogo de sectores de `ms-paquetes` tiene por ahora un único valor, `CENTRAL`.
 - application.yml define puerto 8082, conexión a bd_logistica, JWT, app.ms-paquetes.base-url y app.osrm.base-url.
 - Docker Compose configura MS_PAQUETES_URL=http://ms-paquetes:8081 y las URLs de issuer/JWKS.
 - OSRM se ejecuta como el servicio `osrm` de Docker Compose (imagen `ghcr.io/project-osrm/osrm-backend:v6.0.0`, algoritmo MLD) detrás del profile `osrm`. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`. Dentro de Docker, `OSRM_URL` es `http://osrm:5000`. Todavía no hay cliente HTTP ni lógica de rutas en el código de `ms-logistica`.
@@ -18,27 +19,26 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 
 ## Rama y límites de responsabilidad
 
-1. Crear feature/ms-logistica desde una rama actualizada que ya incluya feature/seguridad, o desde la rama común una vez integrada seguridad. No partir de una base anterior a esa configuración.
+1. Trabajar sobre `feature/ms-logistica`, que ya incluye el merge de `main`.
 2. Mantener entidades, repositorios, servicios y controladores de logística en ms-logistica.
 3. Coordinar los contratos HTTP con el integrante de ms-paquetes. No añadir relaciones JPA hacia entidades de otro servicio ni leer/escribir directamente en su base.
 4. Coordinar con el responsable de OSRM el contrato de entrada/salida y la URL. No duplicar su implementación.
 
-## Decisiones que se deben cerrar antes de modelar
+## Decisiones de flujo y modelo
 
-- El DER actual muestra ENVIO con asignación y ruta obligatorias, aunque el proceso las crea en etapas. Acordar cardinalidades opcionales para un envío recién creado, aún no asignado o planificado.
-- El DER actual ubica estado_entrega, fecha_intento y observacion_incidencia en PARADA_RUTA. También se había considerado una entidad ResultadoEntrega. Definir una sola representación o una relación explícita, evitando duplicar el resultado.
-- Unificar estados del envío, del paquete y del resultado. La documentación mezcla EN_CAMINO y EN_TRANSITO y menciona REPROGRAMADO/RETORNO sin incluirlos en todos los catálogos.
-- Precisar si el mínimo de seis paquetes aplica por envío planificado o por lote/sector y mantener la regla igual en servicios y pruebas.
-- Acordar con ms-paquetes cómo consultar y cambiar estados de paquetes y cómo reservar/liberar vehículos y repartidores. El contrato API actual contiene consultas de disponibilidad, pero no define todas las transiciones de paquetes necesarias para el proceso.
+- Un envío agrupa entre 6 y 99 paquetes distintos de una sucursal y un sector. La composición existe desde `CREADO`. La asignación y la ruta se agregan en etapas posteriores.
+- `EnvioPaquete` guarda el destino y el resultado del intento. `ParadaRuta` guarda el orden de visita y referencia a `EnvioPaquete`.
+- El envío sigue `CREADO → ASIGNADO → PLANIFICADO → EN_CAMINO → PENDIENTE_RETORNO → CERRADO`. Puede cancelarse antes de iniciar. La flota queda reservada hasta que el repartidor confirma el retorno y la disponibilidad.
+- `ms-paquetes` mantiene los estados de los paquetes y las reservas. Queda pendiente incorporar el contrato interno HTTP a partir del CRUD existente.
 
 ## Modelo y persistencia
 
 El dominio operativo pertenece a ms-logistica. El DER actual propone:
 
-- Envio: sector, estado y fechas de creación, inicio y cierre.
-- Asignacion: envío, identificadores de vehículo/repartidor y totales de peso/volumen.
-- RutaPlanificada: envío, distancia, duración estimada, geometría OSRM y fecha de cálculo.
-- ParadaRuta: ruta, identificador externo del paquete, orden, coordenadas y resultado de visita según la decisión de modelado anterior.
+- `Envio` guarda sucursal, sector, estado y fechas.
+- `EnvioPaquete` guarda el ID externo del paquete, el destino y el resultado con fecha y motivo de incidencia.
+- `Asignacion` guarda los IDs del vehículo y el repartidor, el `sub` del repartidor, los totales y las coordenadas de salida.
+- `RutaPlanificada` guarda distancia en metros, duración en segundos, geometría GeoJSON y fecha de cálculo. Cada `ParadaRuta` guarda el orden y el vínculo con `EnvioPaquete`.
 
 Paquete, Vehiculo y Repartidor pertenecen a ms-paquetes. En la base de logística guardar sus IDs externos; para autorización/auditoría, conservar solo los datos adicionales acordados. No crear @ManyToOne hacia clases de otro microservicio ni claves foráneas entre bases.
 
@@ -46,16 +46,16 @@ Usar tipos decimales adecuados, como BigDecimal con precisión/escala definidas.
 
 ## Reglas de negocio que deben quedar en servicios
 
-1. Crear envíos con paquetes elegibles de un sector y cumplir el mínimo acordado.
+1. Crear envíos con paquetes pendientes de la misma sucursal y sector y respetar la cantidad admitida.
 2. Asignar solo vehículo y repartidor disponibles.
 3. Comprobar suma de peso y volumen de paquetes contra la capacidad del vehículo antes de confirmar.
 4. Evitar paquetes duplicados o ya asignados a envíos incompatibles.
 5. Asegurar que la ruta contenga todos los destinos y conserve el orden de visita calculado.
 6. Iniciar reparto solo con asignación/ruta válidas y si el usuario autenticado es el repartidor asignado.
-7. Registrar resultado por paquete/parada y mantener coherente el estado agregado del envío.
-8. Rechazar transiciones inválidas y definir entrega fallida, reintento, reprogramación y retorno.
+7. Registrar un resultado por paquete y envío. Pasar a `PENDIENTE_RETORNO` después del último intento.
+8. Cerrar y liberar la flota al confirmar retorno y disponibilidad. Reprogramar una incidencia después del cierre por acción del administrador.
 
-Las operaciones sobre ms-logistica y ms-paquetes no comparten una transacción ACID. Definir el orden de llamadas y la recuperación/compensación ante fallos. No asumir una transacción única entre bases.
+Para una escritura en ambos servicios, `ms-paquetes` confirma su transacción y responde `200 OK`. Después, `ms-logistica` guarda el cambio en una transacción local. Si se pierde la respuesta o falla el guardado local, el usuario repite la misma solicitud. La reserva por `envioId` y el resultado por paquete y envío permiten reconocer la repetición.
 
 ## Contrato API vigente
 
@@ -91,15 +91,15 @@ Las reglas ya configuradas son:
 
 El control de rol no prueba que el recurso pertenece al usuario. Antes de habilitar los endpoints reales:
 
-1. Coordinar con ms-paquetes cómo vincular el usuario Keycloak con Repartidor. Usar el claim estable sub, no username.
-2. Al asignar, guardar los IDs externos acordados y, si el equipo lo decide, el sub del repartidor asignado en el registro de Asignacion.
+1. `ms-paquetes` registra el `username` del repartidor. Incorporar el vínculo por `sub` de Keycloak antes de habilitar las asignaciones.
+2. Al asignar, guardar los IDs externos y el `sub` del repartidor en `Asignacion`.
 3. Comparar el sub autenticado con el sub asignado antes de consultar/devolver o modificar un envío.
 4. Aplicar esa comprobación a consulta de envío/ruta, inicio y resultado de entrega.
 5. Revisar GET /paquetes/{id}: la regla actual admite cualquier REPARTIDOR y no prueba que el paquete esté en un envío suyo.
 6. Si se usa @PreAuthorize, habilitar seguridad de métodos expresamente; alternativamente ejecutar la autorización en el servicio antes de acceder al recurso.
 7. Nunca registrar JWT, encabezados Authorization ni contraseñas.
 
-Cuando exista una llamada real a ms-paquetes, configurar un RestClient con app.ms-paquetes.base-url. Para una llamada síncrona originada por una solicitud de usuario, reenviar el JWT entrante para conservar identidad y rol. Para tareas sin usuario, acordar client credentials. No reenviar el token a OSRM.
+Configurar el `RestClient` de `ms-paquetes` con `app.ms-paquetes.base-url` y una cuenta de servicio con `client_credentials`. Autorizar ese cliente para el contrato interno. Crear el `RestClient` de OSRM sin credenciales.
 
 ## Integración con ms-paquetes
 
@@ -118,8 +118,8 @@ El servicio ya está definido en Compose y la URL se configura por `OSRM_URL` / 
 
 Contrato a respetar:
 
-- Endpoints HTTP/JSON: `/route/v1/driving/{coords}` para una ruta con orden fijo, `/trip/v1/driving/{coords}` para optimizar el orden de visita (TSP) y `/table/v1/driving/{coords}` para matrices de distancia/duración. La ruta optimizada del envío se obtiene con `trip` (o un orden propio) y se confirma con `route`.
-- Coordenadas en formato `longitud,latitud;longitud,latitud` — al revés que en los mapas. Invertirlas devuelve `NoSegment`.
+- Usar `/trip/v1/driving/{coords}` con `roundtrip=false&source=first&destination=any`. La sucursal es el primer punto de entrada y Trip elige el último destino. La respuesta incluye el orden, la geometría, la distancia y la duración.
+- Enviar coordenadas como `longitud,latitud;longitud,latitud`. Asociar cada `waypoint` al punto en la misma posición de entrada y después ordenar por `waypoint_index`.
 - Usar `overview=full&geometries=geojson` para obtener la geometría que se persiste en `RutaPlanificada`; `distance` sale en metros y `duration` en segundos.
 - Cualquier punto fuera de la provincia de Córdoba no tiene red: validar los destinos antes de planificar.
 - Timeout, respuesta inválida y caída externa sin dejar una ruta parcialmente válida.
@@ -177,7 +177,7 @@ Los tests existentes son de arranque de contexto. Agregar pruebas unitarias de s
 
 ## Orden sugerido de trabajo
 
-1. Cerrar DER, estados, regla de mínimo y contratos con el equipo.
+1. Revisar el DER, el flujo de estados y las reglas de negocio documentadas.
 2. Implementar entidades y repositorios locales.
 3. Acordar DTOs e implementar cliente de ms-paquetes.
 4. Implementar servicios de creación, asignación, planificación, inicio y resultado.

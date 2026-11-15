@@ -29,7 +29,7 @@ Por esto, se busca reducir el tiempo de entrega de paquetes de forma que resulte
 > [!IMPORTANT]
 >Sistema de logística de paquetes que resuelva el envío de paquetes entre varios puntos de entrega, optimizando la distancia y tiempo de entrega por el camino más conveniente. Destinada a una empresa de logística estilo OCA para mejorar sus procesos de envío de paquetes, ahorrando recursos y sirviendo de guía para los repartidores para lograr su trabajo. Abarca desde la recepción de paquetes y su registro, la clasificación de estos por sectores de entrega, la asignación de cargas a los vehículos según capacidad y disponibilidad, la optimización de las rutas y el seguimiento del paquete.
 
-El principal aporte del sistema radica en la automatización del proceso de planificación operativa: consolida paquetes por sectores de entrega y aplica un algoritmo de ruteo inteligente que resuelve el trayecto más eficiente, considerando las restricciones físicas de la flota (límites de volumen y peso por vehículo) y la disponibilidad del personal asignado. Asimismo, garantiza la viabilidad del envío exigiendo un umbral mínimo de 6 paquetes por lote planificado.
+El administrador arma envíos por sucursal y sector, con al menos 6 paquetes por envío. El sistema valida los límites de volumen y peso del vehículo y la disponibilidad de los recursos elegidos. OSRM Trip ordena las entregas, con salida desde la sucursal y llegada al último destino que elige el motor.
 Como resultado concreto, la plataforma proveerá a los administradores una herramienta centralizada para la gestión de flota y paquetes, y generará automáticamente hojas de ruta secuenciadas paso a paso para los repartidores. Esto permitirá reducir el tiempo total en tránsito y minimizar el consumo de combustible y desgaste de vehículos.
 
 ## Actores
@@ -43,7 +43,7 @@ Como resultado concreto, la plataforma proveerá a los administradores una herra
 - Gestión del envío de paquetes por sectores.
 - Asignación de paquetes a vehículos según capacidad (volumen y peso) y disponibilidad. 
 - Gestión de seguimiento y registro de entrega. 
-- Optimización de la ruta según tiempo y distancia.
+- Optimización del orden de entrega según el tiempo de viaje, con distancia estimada del recorrido.
 
 No incluye:
 - Seguimiento por parte del cliente del paquete. 
@@ -59,28 +59,27 @@ No incluye:
 | F-03 | Gestionar Sucursal | Administrador | Registrar, consultar, modificar y desactivar sucursales, incluyendo sus datos de identificación, dirección y sector asociado. | Las sucursales quedan disponibles para organizar paquetes y planificar envíos por sector. | MEDIA |
 | F-04 | Gestionar paquetes | Administrador | Registrar y actualizar el estado de los paquetes | El paquete queda registrado y puede incluirse en la planificación de envíos | ALTA |
 | F-05 | Asignar paquete a vehículo | Administrador | Gestionar los paquetes a los vehículos según capacidad y disponibilidad | Paquetes asignados a los vehículo para poder realizar el envío | ALTA |
-| F-06 | Planificar rutas de entrega | Administrador | Planificar las rutas de entrega según el sector para minimizar el recorrido. | Se muestra una secuencia de puntos de entrega y la ruta propuesta. | ALTA |
+| F-06 | Planificar rutas de entrega | Administrador | Calcular con OSRM Trip el orden de las entregas desde la sucursal. | Se muestran las paradas, la ruta abierta, su distancia y su duración estimada. | ALTA |
 | F-07 | Gestionar el ordenamiento de paquetes por sector | Administrador | Gestionar cómo se ordenarán los paquetes según el sector de envio | Se muestra los paquetes ordenados por sector para realizar el envío | ALTA |
 | F-08 | Consultar ruta | Repartidor | Consulta la ruta que debe realizar para entregar los paquetes | Visualizacion e indicaciones sobre la ruta especifica que se consulta | ALTA |
-| F-09 | Actualizar estado de envío | Repartidor | Actualizar el estado del envío desde el momento que salio hasta el momento de entrega | Estado de el envío actualizado por el repartidor (Posibles estados: Pendiente, En camino, Entregado) | ALTA |
+| F-09 | Gestionar el reparto | Repartidor | Iniciar el envío asignado y confirmar el retorno a la sucursal y la disponibilidad al terminar. | El envío pasa a `EN_CAMINO` al iniciar y a `CERRADO` al confirmar el retorno. | ALTA |
 | F-10 | Registrar estado de la entrega | Repartidor | Registrar si el paquete fue entregado o si no pudo concretarse la entrega | Queda guardado el resultado y el momento del intento. | ALTA |
 
 ## Reglas de negocio
 
 - Se deberá indicar el alto, ancho, largo y peso del paquete al registrarlo.
-- El peso y dimensión del paquete no deberá sobrepasar el límite establecido por vehículo.
-- Se deberá asignar un peso máximo que podrá cargar el vehiculo
-- Se podrá asignar a los envíos a repartidores que se encuentran disponibles.
-- Se podrá asignar paquetes a vehículos si se encuentran disponibles.
+- El peso y el volumen totales de la carga deben respetar las capacidades del vehículo. El MVP controla el volumen agregado en m³. La comprobación de que un bulto cabe físicamente requeriría las dimensiones útiles del vehículo.
+- El administrador elige un vehículo y un repartidor disponibles de la sucursal del envío. `ms-paquetes` vuelve a validar la disponibilidad y la carga al reservar los recursos.
 - Se podrá consultar el estado del envío en cualquier momento que el repartidor desee.
 - Cada paquete deberá tener indicado una dirección de envío (como coordenadas: latitud y longitud)
 - Cada paquete deberá poder identificarse con un ID único.
 - Cada paquete deberá contener el nombre del cliente.
-- Cada paquete deberá pertenecer a un envío y a un sector de entrega.
-- Un envío debe tener al menos 6 paquetes para poder planificarse.
-- Solo se podrán planificar envíos con paquetes PENDIENTE, es decir que hayan llegado a la sucursal y hayan sido registrados por el administrador esperando a ser entregados.
-- La ruta planificada deberá incluir los destinos de todos los paquetes asignados al envío.
-- El paquete tendrá los siguientes estados válidos (PENDIENTE, ASIGNADO, EN_CAMINO, ENTREGADO, INCIDENCIA)
+- Cada paquete pertenece a una sucursal y un sector. Un envío agrupa entre 6 y 99 paquetes distintos de la misma sucursal y sector.
+- Los paquetes deben estar `PENDIENTE` al crear el borrador y al reservar la carga. La reserva confirma su estado `ASIGNADO`. Un paquete solo puede tener una reserva activa.
+- La ruta se calcula una vez confirmada la asignación. Sale de la sucursal e incluye todos los destinos del envío. Trip elige la última entrega.
+- El envío sigue `CREADO → ASIGNADO → PLANIFICADO → EN_CAMINO → PENDIENTE_RETORNO → CERRADO`. El administrador puede cancelar antes del inicio.
+- Los estados del paquete son `PENDIENTE`, `ASIGNADO`, `EN_CAMINO`, `ENTREGADO` e `INCIDENCIA`. Cada intento guarda el resultado y, si corresponde, el motivo de la incidencia.
+- Después del último intento, el vehículo y el repartidor permanecen reservados hasta que el repartidor confirma el retorno a la sucursal y la disponibilidad. Tras el cierre, el administrador puede reprogramar un paquete con incidencia y devolverlo a `PENDIENTE` manteniendo el intento original.
 
 ## Diseño de la arquitectura
 Se dividirán en los siguientes microservicios:
@@ -174,13 +173,13 @@ Keycloak es el proveedor de identidad del sistema. El realm `logistica` define l
 - En `ms-logistica`, la creación de envíos, las asignaciones y el cálculo de rutas requieren `ADMINISTRADOR`. El inicio del reparto y el registro del resultado de entrega requieren `REPARTIDOR`. Las consultas de un envío o su ruta permiten ambos roles.
 - Una solicitud sin token válido debe recibir `401 Unauthorized`; un usuario autenticado sin el rol requerido debe recibir `403 Forbidden`. Las rutas no declaradas en las reglas de los microservicios se deniegan.
 
-Las reglas actuales verifican roles, pero todavía no verifican que el envío consultado o actualizado esté asignado al repartidor autenticado. Esa autorización sobre el recurso debe implementarse en la lógica de `ms-logistica` cuando existan las entidades y relaciones del dominio. Del mismo modo, `ms-paquetes` todavía no vincula una identidad de Keycloak con la entidad Repartidor.
+Las reglas actuales verifican roles. La comprobación de que el repartidor autenticado tiene asignado el envío se implementará en `ms-logistica`. `ms-paquetes` ya registra el `username` del repartidor. La asignación usará el `sub` de Keycloak para verificar la identidad.
 
 ### Estado de implementación
 
 La configuración de seguridad, el enrutamiento del gateway, la conexión a MariaDB y la importación del realm de Keycloak están configurados. Se comprobó manualmente el acceso con un token de administrador a través del gateway. La matriz completa de casos `401`, `403` y accesos permitidos debe volver a comprobarse cuando estén implementados los endpoints reales.
 
-La tabla de APIs de esta sección define el contrato comprometido, no endpoints ya implementados. Actualmente los módulos todavía no contienen entidades, repositorios, servicios ni controladores de negocio.
+`ms-paquetes` ya tiene entidades, repositorios, servicios y controladores para clientes, sucursales, vehículos, repartidores y paquetes. Ya permite cambiar el estado de un paquete individual. Quedan pendientes el contrato interno de reserva y los endpoints de negocio de `ms-logistica`.
 
 ### Comprobaciones comprometidas
 
@@ -249,7 +248,7 @@ El script `infra/mariadb/init/01-crear-bases.sql` crea las tres bases lógicas. 
 2. Funcionalidades obligatorias
    - Gestión del dominio: Alta y registro de paquetes (con destino, peso y dimensiones), sucursales, vehículos y repartidores.
    - Asignación de recursos: Asignación de paquetes a recursos disponibles (vehículo y repartidor), validando estrictamente la compatibilidad de la carga (capacidad de peso y volumen) con cada vehículo y según el sector de entrega que cubrirá el vehículo.
-   - Planificación: Trazado de rutas por tiempo y distancia, devolviendo la ruta más eficiente.
+   - Planificación: OSRM Trip propone el orden de las entregas según el tiempo de viaje y devuelve distancia, duración y recorrido.
    - Gestión operativa: Consulta del recorrido asignado y registro del resultado de entrega (éxito o motivo de fallo) por parte del repartidor.
 3. Integraciones relevantes y Arquitectura
    - Arquitectura: La solución estará organizada en ms-paquetes, ms-logística y un api-gateway.
