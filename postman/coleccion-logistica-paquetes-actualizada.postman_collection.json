@@ -1,0 +1,1215 @@
+{
+  "info": {
+    "name": "Logistica Paquetes - Flujo Completo Postman",
+    "description": "Flujo de negocio end-to-end. Ejecutar el setup una sola vez por juego de datos; el proceso principal requiere informar resultado para los seis paquetes antes del cierre. El contrato interno tiene una colección separada.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Autenticación y Salud",
+      "item": [
+        {
+          "name": "Health - API Gateway (8080)",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Health - ms-paquetes (8081)",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_paquetes_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Health - ms-logistica (8082)",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_logistica_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Token - Administrador (admin.logistica)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('admin_token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "logistica-api"
+                },
+                {
+                  "key": "username",
+                  "value": "{{admin_username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{admin_password}}"
+                }
+              ]
+            },
+            "url": "{{keycloak_token_url}}"
+          }
+        },
+        {
+          "name": "Token - Repartidor (usuario del entorno + extrae sub)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('repartidor_token', json.access_token);",
+                  "const payload = JSON.parse(atob(json.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.environment.set('repartidor_sub', payload.sub);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "logistica-api"
+                },
+                {
+                  "key": "username",
+                  "value": "{{repartidor_username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{repartidor_password}}"
+                }
+              ]
+            },
+            "url": "{{keycloak_token_url}}"
+          }
+        }
+      ],
+      "description": "Ejecutar los tokens de administrador y repartidor. El token técnico solo se usa en la colección separada del contrato interno."
+    },
+    {
+      "name": "01 - Setup y CRUDs (ms-paquetes via Gateway)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{admin_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "01.1 Crear Sucursal Central",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('id_sucursal', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Sucursal Centro\",\n  \"direccion\": \"Av. Colon 500, Cordoba\",\n  \"latitud\": -31.4167000,\n  \"longitud\": -64.1833000,\n  \"esCentral\": true\n}"
+            },
+            "url": "{{gateway_url}}/sucursales"
+          }
+        },
+        {
+          "name": "01.2 Listar Sucursales",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/sucursales"
+          }
+        },
+        {
+          "name": "01.3 Crear Cliente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('id_cliente', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente Postman\",\n  \"telefono\": \"351 555-0199\",\n  \"email\": \"postman@logistica.local\"\n}"
+            },
+            "url": "{{gateway_url}}/clientes"
+          }
+        },
+        {
+          "name": "01.4 Crear Vehiculo Grande (800kg / 6m3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('id_vehiculo_grande', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patente\": \"PM100AA\",\n  \"modelo\": \"Mercedes Sprinter\",\n  \"capacidadPesoKg\": 800.00,\n  \"capacidadVolumenM3\": 6.000,\n  \"sucursalId\": {{id_sucursal}}\n}"
+            },
+            "url": "{{gateway_url}}/vehiculos"
+          }
+        },
+        {
+          "name": "01.5 Crear Vehiculo Chico (10kg / 0.1m3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('id_vehiculo_chico', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patente\": \"PM200BB\",\n  \"modelo\": \"Utilitario Chico\",\n  \"capacidadPesoKg\": 10.00,\n  \"capacidadVolumenM3\": 0.100,\n  \"sucursalId\": {{id_sucursal}}\n}"
+            },
+            "url": "{{gateway_url}}/vehiculos"
+          }
+        },
+        {
+          "name": "01.6 Crear Repartidor vinculado a Keycloak sub",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('id_repartidor', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Repartidor Logistica\",\n  \"telefono\": \"351 555-0101\",\n  \"username\": \"{{repartidor_username}}\",\n  \"keycloakSub\": \"{{repartidor_sub}}\",\n  \"sucursalId\": {{id_sucursal}}\n}"
+            },
+            "url": "{{gateway_url}}/repartidores"
+          }
+        },
+        {
+          "name": "01.7 Crear Paquete 1 (Nueva Cordoba)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.environment.set('id_paquete_1', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{id_cliente}},\n  \"sucursalId\": {{id_sucursal}},\n  \"direccionEnvio\": \"Obispo Trejo 300, Nueva Cordoba\",\n  \"latitud\": -31.4290000,\n  \"longitud\": -64.1850000,\n  \"altoCm\": 30.00,\n  \"anchoCm\": 30.00,\n  \"largoCm\": 30.00,\n  \"pesoKg\": 2.50\n}"
+            },
+            "url": "{{gateway_url}}/paquetes"
+          }
+        },
+        {
+          "name": "01.8 Crear Paquete 2 (Alberdi)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.environment.set('id_paquete_2', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{id_cliente}},\n  \"sucursalId\": {{id_sucursal}},\n  \"direccionEnvio\": \"Av. Colon 1500, Alberdi\",\n  \"latitud\": -31.4130000,\n  \"longitud\": -64.2060000,\n  \"altoCm\": 40.00,\n  \"anchoCm\": 30.00,\n  \"largoCm\": 20.00,\n  \"pesoKg\": 3.00\n}"
+            },
+            "url": "{{gateway_url}}/paquetes"
+          }
+        },
+        {
+          "name": "01.9 Crear Paquete 3 (Guemes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.environment.set('id_paquete_3', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{id_cliente}},\n  \"sucursalId\": {{id_sucursal}},\n  \"direccionEnvio\": \"Belgrano 750, Guemes\",\n  \"latitud\": -31.4235000,\n  \"longitud\": -64.1955000,\n  \"altoCm\": 25.00,\n  \"anchoCm\": 25.00,\n  \"largoCm\": 25.00,\n  \"pesoKg\": 4.00\n}"
+            },
+            "url": "{{gateway_url}}/paquetes"
+          }
+        },
+        {
+          "name": "01.10 Crear Paquete 4 (Cerro de las Rosas)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.environment.set('id_paquete_4', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{id_cliente}},\n  \"sucursalId\": {{id_sucursal}},\n  \"direccionEnvio\": \"Rafael Nunez 4200, Cerro de las Rosas\",\n  \"latitud\": -31.3800000,\n  \"longitud\": -64.2250000,\n  \"altoCm\": 50.00,\n  \"anchoCm\": 40.00,\n  \"largoCm\": 30.00,\n  \"pesoKg\": 3.50\n}"
+            },
+            "url": "{{gateway_url}}/paquetes"
+          }
+        },
+        {
+          "name": "01.11 Crear Paquete 5 (General Paz)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.environment.set('id_paquete_5', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{id_cliente}},\n  \"sucursalId\": {{id_sucursal}},\n  \"direccionEnvio\": \"24 de Septiembre 1100, General Paz\",\n  \"latitud\": -31.4040000,\n  \"longitud\": -64.1650000,\n  \"altoCm\": 20.00,\n  \"anchoCm\": 20.00,\n  \"largoCm\": 20.00,\n  \"pesoKg\": 2.00\n}"
+            },
+            "url": "{{gateway_url}}/paquetes"
+          }
+        },
+        {
+          "name": "01.12 Crear Paquete 6 (Alta Cordoba)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.environment.set('id_paquete_6', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{id_cliente}},\n  \"sucursalId\": {{id_sucursal}},\n  \"direccionEnvio\": \"Isabel La Catolica 900, Alta Cordoba\",\n  \"latitud\": -31.3950000,\n  \"longitud\": -64.1780000,\n  \"altoCm\": 35.00,\n  \"anchoCm\": 35.00,\n  \"largoCm\": 35.00,\n  \"pesoKg\": 5.00\n}"
+            },
+            "url": "{{gateway_url}}/paquetes"
+          }
+        },
+        {
+          "name": "01.13 Listar Paquetes PENDIENTE y CENTRAL",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/paquetes?estado=PENDIENTE&sector=CENTRAL"
+          }
+        }
+      ],
+      "description": "Ejecutar una sola vez por base de datos. Si vehículo o repartidor responde 422 por duplicado, reutilizar los IDs existentes del entorno y omitir esa creación. Ejecutar los paquetes solo cuando id_cliente e id_sucursal tengan IDs válidos."
+    },
+    {
+      "name": "03 - Proceso Principal MVP (ms-logistica)",
+      "item": [
+        {
+          "name": "03.1 Crear Borrador Envio (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "  pm.environment.set('id_envio', pm.response.json().id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sucursalId\": {{id_sucursal}},\n  \"sector\": \"CENTRAL\",\n  \"paqueteIds\": [{{id_paquete_1}}, {{id_paquete_2}}, {{id_paquete_3}}, {{id_paquete_4}}, {{id_paquete_5}}, {{id_paquete_6}}]\n}"
+            },
+            "url": "{{gateway_url}}/envios"
+          }
+        },
+        {
+          "name": "03.2 Asignar Recursos al Envio (Admin)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vehiculoId\": {{id_vehiculo_grande}},\n  \"repartidorId\": {{id_repartidor}}\n}"
+            },
+            "url": "{{gateway_url}}/envios/{{id_envio}}/asignaciones"
+          }
+        },
+        {
+          "name": "03.3 Calcular y Guardar Ruta con OSRM (Admin)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "url": "{{gateway_url}}/envios/{{id_envio}}/ruta"
+          }
+        },
+        {
+          "name": "03.4 Consultar Ruta del Envio (Repartidor Asignado)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": "{{gateway_url}}/envios/{{id_envio}}/ruta"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "const paradas = body.paradas || [];",
+                  "pm.test('La ruta tiene seis paquetes', function () { pm.expect(paradas.length).to.eql(6); });",
+                  "paradas.forEach(function (parada, index) { pm.environment.set('id_paquete_' + (index + 1), parada.paqueteId); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.8 Consultar Mis Rutas (Repartidor)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway_url}}/envios/mias/rutas",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });\nconst envioId = String(pm.environment.get('id_envio'));\nconst rutas = pm.response.json();\npm.test('El envío aparece entre mis rutas', function () { pm.expect(rutas.some(function (ruta) { return String(ruta.envioId) === envioId; })).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "description": "Confirma que el token del repartidor ve sus rutas asignadas."
+        },
+        {
+          "name": "03.5 Iniciar Reparto (Repartidor Asignado)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "url": "{{gateway_url}}/envios/{{id_envio}}/inicio"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.6 Registrar Entrega Exitosa Paquete 1 (Repartidor Asignado)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resultado\": \"ENTREGADO\"\n}"
+            },
+            "url": "{{gateway_url}}/envios/{{id_envio}}/paquetes/{{id_paquete_1}}/resultado"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.7 Registrar Incidencia Paquete 2 (Repartidor Asignado)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resultado\": \"INCIDENCIA\",\n  \"motivoIncidencia\": \"Domicilio cerrado sin moradores\"\n}"
+            },
+            "url": "{{gateway_url}}/envios/{{id_envio}}/paquetes/{{id_paquete_2}}/resultado"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.9 Registrar Entrega Paquete 3",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway_url}}/envios/{{id_envio}}/paquetes/{{id_paquete_3}}/resultado",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"resultado\":\"ENTREGADO\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "description": "Registra el resultado de este paquete; hace falta informar el resultado de todos antes del cierre."
+        },
+        {
+          "name": "03.10 Registrar Entrega Paquete 4",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway_url}}/envios/{{id_envio}}/paquetes/{{id_paquete_4}}/resultado",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"resultado\":\"ENTREGADO\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "description": "Registra el resultado de este paquete; hace falta informar el resultado de todos antes del cierre."
+        },
+        {
+          "name": "03.11 Registrar Entrega Paquete 5",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway_url}}/envios/{{id_envio}}/paquetes/{{id_paquete_5}}/resultado",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"resultado\":\"ENTREGADO\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "description": "Registra el resultado de este paquete; hace falta informar el resultado de todos antes del cierre."
+        },
+        {
+          "name": "03.12 Registrar Entrega Paquete 6",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway_url}}/envios/{{id_envio}}/paquetes/{{id_paquete_6}}/resultado",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"resultado\":\"ENTREGADO\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "description": "Registra el resultado de este paquete; hace falta informar el resultado de todos antes del cierre."
+        },
+        {
+          "name": "03.13 Cerrar Envío y Liberar Reserva",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway_url}}/envios/{{id_envio}}/cierre",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "description": "Confirma el retorno. La reserva se libera automáticamente en ms-paquetes."
+        },
+        {
+          "name": "03.14 Verificar Envío Cerrado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway_url}}/envios/{{id_envio}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Envío cerrado', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().estado).to.eql('CERRADO'); });"
+                ]
+              }
+            }
+          ],
+          "description": "Comprueba el estado final desde el rol administrador."
+        },
+        {
+          "name": "03.15 Listar Envíos del Sector CENTRAL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway_url}}/envios?sector=CENTRAL",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });\nconst envioId = String(pm.environment.get('id_envio'));\nconst envios = pm.response.json();\npm.test('El envío aparece en el filtro por sector', function () { pm.expect(envios.some(function (envio) { return String(envio.id) === envioId; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Ejecutar en orden con los tokens de admin y repartidor. Registrar resultado para cada paquete antes del cierre."
+    },
+    {
+      "name": "04 - Escenarios Negativos y Seguridad (Testeables HOY)",
+      "item": [
+        {
+          "name": "401 - Sin Token en Gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/sucursales"
+          }
+        },
+        {
+          "name": "403 - Repartidor intenta crear Sucursal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{repartidor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Sucursal Ilegal\",\n  \"direccion\": \"Calle Falsa 123\",\n  \"latitud\": -31.4,\n  \"longitud\": -64.1,\n  \"esCentral\": false\n}"
+            },
+            "url": "{{gateway_url}}/sucursales"
+          }
+        },
+        {
+          "name": "403 - Admin intenta llamar endpoint interno sin rol MS-LOGISTICA",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": "{{ms_paquetes_url}}/interno/logistica/vehiculos/disponibles?sucursalId={{id_sucursal}}"
+          }
+        },
+        {
+          "name": "400 - Reserva con menos de 6 paquetes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sucursalId\": {{id_sucursal}},\n  \"sector\": \"CENTRAL\",\n  \"paqueteIds\": [{{id_paquete_1}}, {{id_paquete_2}}],\n  \"vehiculoId\": {{id_vehiculo_grande}},\n  \"repartidorId\": {{id_repartidor}}\n}"
+            },
+            "url": "{{ms_paquetes_url}}/interno/logistica/envios/9998/reserva"
+          }
+        },
+        {
+          "name": "422 - Reserva excede capacidad del vehiculo chico",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422 Unprocessable Entity', () => pm.response.to.have.status(422));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sucursalId\": {{id_sucursal}},\n  \"sector\": \"CENTRAL\",\n  \"paqueteIds\": [{{id_paquete_1}}, {{id_paquete_2}}, {{id_paquete_3}}, {{id_paquete_4}}, {{id_paquete_5}}, {{id_paquete_6}}],\n  \"vehiculoId\": {{id_vehiculo_chico}},\n  \"repartidorId\": {{id_repartidor}}\n}"
+            },
+            "url": "{{ms_paquetes_url}}/interno/logistica/envios/9997/reserva"
+          }
+        },
+        {
+          "name": "422 - Transicion invalida de estado (PENDIENTE -> ENTREGADO)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422 Unprocessable Entity', () => pm.response.to.have.status(422));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            },
+            "url": "{{gateway_url}}/paquetes/{{id_paquete_2}}/estado"
+          }
+        },
+        {
+          "name": "404 - Paquete Inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": "{{gateway_url}}/paquetes/999999"
+          }
+        }
+      ]
+    }
+  ]
+}

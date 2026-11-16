@@ -61,7 +61,8 @@ public class SecurityConfig {
                 .requestMatchers(
                     HttpMethod.PATCH,
                     "/envios/{id}/inicio",
-                    "/envios/{id}/paquetes/{paqueteId}/resultado"
+                    "/envios/{id}/paquetes/{paqueteId}/resultado",
+                    "/envios/{id}/cierre"
                 ).hasRole("REPARTIDOR")
 
                 .anyRequest().denyAll()

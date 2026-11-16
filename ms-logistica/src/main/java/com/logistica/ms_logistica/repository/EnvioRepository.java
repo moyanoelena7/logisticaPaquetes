@@ -33,6 +33,40 @@ public interface EnvioRepository extends JpaRepository<Envio, Long> {
     @Query("""
             select distinct e
             from Envio e
+            left join fetch e.paquetes p
+            left join fetch e.asignacion a
+            where (:estado is null or e.estado = :estado)
+              and (:sector is null or upper(e.sector) = upper(:sector))
+            order by e.fechaCreacion desc
+            """)
+    List<Envio> buscarConFiltros(
+            @Param("estado") EstadoEnvio estado,
+            @Param("sector") String sector
+    );
+
+    @Query("""
+            select distinct e
+            from Envio e
+            left join fetch e.paquetes p
+            left join fetch e.asignacion a
+            left join fetch e.ruta r
+            where e.id = :id
+            """)
+    Optional<Envio> buscarParaConsulta(@Param("id") Long id);
+
+    @Query("""
+            select distinct e
+            from Envio e
+            left join fetch e.paquetes p
+            left join fetch e.asignacion a
+            left join fetch e.ruta r
+            where e.id = :id
+            """)
+    Optional<Envio> buscarContextoReparto(@Param("id") Long id);
+
+    @Query("""
+            select distinct e
+            from Envio e
             join fetch e.asignacion a
             join fetch e.ruta r
             left join fetch r.paradas p

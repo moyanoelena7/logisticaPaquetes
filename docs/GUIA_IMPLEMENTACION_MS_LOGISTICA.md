@@ -29,7 +29,7 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 - Un envío agrupa entre 6 y 99 paquetes distintos de una sucursal y un sector. La composición existe desde `CREADO`. La asignación y la ruta se agregan en etapas posteriores.
 - `EnvioPaquete` guarda el destino y el resultado del intento. `ParadaRuta` guarda el orden de visita y referencia a `EnvioPaquete`.
 - El envío sigue `CREADO → ASIGNADO → PLANIFICADO → EN_CAMINO → PENDIENTE_RETORNO → CERRADO`. Puede cancelarse antes de iniciar. La flota queda reservada hasta que el repartidor confirma el retorno y la disponibilidad.
-- `ms-paquetes` mantiene los estados de los paquetes y las reservas. Queda pendiente incorporar el contrato interno HTTP a partir del CRUD existente.
+- `ms-paquetes` mantiene los estados de los paquetes y las reservas. `ms-logistica` usa el contrato interno HTTP para consultar, reservar/liberar y avanzar el estado de los paquetes.
 
 ## Modelo y persistencia
 
@@ -72,8 +72,10 @@ Mantener esta tabla alineada con docs/DECISIONS.md, los controladores y Security
 | POST | /envios/{id}/ruta | ADMINISTRADOR | Calcular y guardar ruta |
 | PATCH | /envios/{id}/inicio | REPARTIDOR | Iniciar reparto |
 | PATCH | /envios/{id}/paquetes/{paqueteId}/resultado | REPARTIDOR | Registrar resultado de entrega |
+| PATCH | /envios/{id}/cierre | REPARTIDOR | Confirmar retorno y liberar recursos |
 
 Los query parameters no forman parte del path que evalúa Spring Security; GET /envios cubre las consultas por sector o estado.
+Inicio y cierre no requieren cuerpo; las fechas se asignan en el servidor. El resultado usa `{"resultado":"ENTREGADO"}` o `{"resultado":"INCIDENCIA","motivoIncidencia":"..."}`. Las operaciones PATCH responden `204 No Content`. Repetir el mismo resultado y motivo es idempotente; enviar un resultado distinto para un paquete ya resuelto produce conflicto.
 
 ## Seguridad: preservar y completar
 
@@ -85,7 +87,7 @@ Las reglas ya configuradas son:
 - GET /envios: ADMINISTRADOR.
 - GET /envios/{id} y GET /envios/{id}/ruta: ADMINISTRADOR o REPARTIDOR.
 - POST de creación, asignación y cálculo de ruta: ADMINISTRADOR.
-- PATCH de inicio y resultado: REPARTIDOR.
+- PATCH de inicio, resultado y cierre: REPARTIDOR; el servicio comprueba que el `sub` corresponda al repartidor asignado.
 - Cualquier ruta no declarada queda denegada; cada endpoint nuevo necesita una regla explícita.
 - realm_access.roles se convierte a ROLE_ADMINISTRADOR y ROLE_REPARTIDOR.
 
@@ -110,7 +112,7 @@ Antes de codificar el cliente, acordar DTOs y errores para:
 - Reservar/liberar recursos y actualizar el estado de los paquetes.
 - Manejar ID inexistente, estado no elegible, no disponibilidad y fallos del servicio.
 
-Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a errores de aplicación claros. Configurar timeout. Limitar reintentos a operaciones idempotentes, principalmente GET; no repetir POST/PATCH sin idempotencia.
+Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a errores de aplicación claros. Configurar timeout. Limitar reintentos a operaciones idempotentes, principalmente GET; el PATCH de estado de paquete es repetible si solicita el estado ya persistido, y la liberación de reserva por `envioId` también es idempotente.
 
 ## Integración OSRM
 

@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.Comparator;
 import java.util.stream.Collectors;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +21,8 @@ import com.logistica.ms_logistica.domain.ResultadoEntrega;
 import com.logistica.ms_logistica.dto.AsignacionConfirmada;
 import com.logistica.ms_logistica.dto.ContextoAsignacion;
 import com.logistica.ms_logistica.dto.ContextoPlanificacion;
+import com.logistica.ms_logistica.dto.ContextoReparto;
+import com.logistica.ms_logistica.exception.RecursoNoEncontradoException;
 import com.logistica.ms_logistica.repository.EnvioRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -56,7 +59,7 @@ public class EnvioService {
     @Transactional(readOnly = true)
     public ContextoAsignacion obtenerContextoAsignacion(Long envioId) {
         Envio envio = repository.findById(envioId)
-                .orElseThrow(() -> new IllegalArgumentException("No existe el envío " + envioId));
+                .orElseThrow(() -> new RecursoNoEncontradoException("No existe el envío " + envioId));
         EstadoEnvio estado = envio.getEstado();
         if (estado != EstadoEnvio.CREADO && !asignacionPuedeReintentarse(estado)) {
             throw new IllegalStateException("El envío no admite asignación en estado " + estado);
@@ -84,7 +87,7 @@ public class EnvioService {
     @Transactional(readOnly = true)
     public ContextoPlanificacion obtenerContextoPlanificacion(Long envioId) {
         Envio envio = repository.findById(envioId)
-                .orElseThrow(() -> new IllegalArgumentException("No existe el envío " + envioId));
+                .orElseThrow(() -> new RecursoNoEncontradoException("No existe el envío " + envioId));
         if (envio.getEstado() != EstadoEnvio.ASIGNADO && envio.getEstado() != EstadoEnvio.PLANIFICADO) {
             throw new IllegalStateException("El envío debe estar ASIGNADO para calcular la ruta");
         }
@@ -120,6 +123,109 @@ public class EnvioService {
                 asignacion.getLongitudSalida(),
                 entregas
         );
+    }
+
+    @Transactional(readOnly = true)
+    public ContextoReparto obtenerContextoReparto(Long envioId) {
+        validarEnvioId(envioId);
+        Envio envio = repository.buscarContextoReparto(envioId)
+                .orElseThrow(() -> new RecursoNoEncontradoException("No existe el envío " + envioId));
+        Asignacion asignacion = envio.getAsignacion();
+        return new ContextoReparto(
+                envio.getId(),
+                envio.getEstado(),
+                asignacion == null ? null : asignacion.getRepartidorSub(),
+                envio.getRuta() != null,
+                envio.getPaquetes().stream()
+                        .map(paquete -> new ContextoReparto.Paquete(
+                                paquete.getPaqueteId(),
+                                paquete.getResultado(),
+                                paquete.getMotivoIncidencia()))
+                        .toList());
+    }
+
+    @Transactional
+    public void iniciarRepartoLocal(Long envioId, String repartidorSub, Instant fechaInicio) {
+        Envio envio = buscarParaActualizar(envioId);
+        validarRepartidorAsignado(envio, repartidorSub);
+
+        if (envio.getEstado() == EstadoEnvio.EN_CAMINO) {
+            return;
+        }
+        if (envio.getEstado() != EstadoEnvio.PLANIFICADO) {
+            throw new IllegalStateException("Solo se puede iniciar un envío en estado PLANIFICADO");
+        }
+        if (envio.getAsignacion() == null || envio.getRuta() == null) {
+            throw new IllegalStateException("El envío requiere una asignación y una ruta planificada para iniciar");
+        }
+
+        envio.setFechaInicio(Objects.requireNonNull(fechaInicio));
+        envio.setEstado(EstadoEnvio.EN_CAMINO);
+    }
+
+    @Transactional
+    public void registrarResultadoLocal(
+            Long envioId,
+            Long paqueteId,
+            String repartidorSub,
+            ResultadoEntrega resultado,
+            String motivoIncidencia,
+            Instant fechaIntento
+    ) {
+        Envio envio = buscarParaActualizar(envioId);
+        validarRepartidorAsignado(envio, repartidorSub);
+        EnvioPaquete paquete = envio.getPaquetes().stream()
+                .filter(item -> Objects.equals(item.getPaqueteId(), paqueteId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("El paquete no pertenece al envío"));
+
+        if (paquete.getResultado() != ResultadoEntrega.PENDIENTE) {
+            if (paquete.getResultado() == resultado
+                    && Objects.equals(paquete.getMotivoIncidencia(), motivoIncidencia)) {
+                return;
+            }
+            throw new IllegalStateException("El paquete ya tiene un resultado distinto registrado para el envío");
+        }
+        if (envio.getEstado() != EstadoEnvio.EN_CAMINO) {
+            throw new IllegalStateException("Solo se pueden registrar entregas de un envío en estado EN_CAMINO");
+        }
+
+        paquete.setFechaIntento(Objects.requireNonNull(fechaIntento));
+        paquete.setResultado(Objects.requireNonNull(resultado));
+        paquete.setMotivoIncidencia(motivoIncidencia);
+        if (envio.getPaquetes().stream().noneMatch(item -> item.getResultado() == ResultadoEntrega.PENDIENTE)) {
+            envio.setEstado(EstadoEnvio.PENDIENTE_RETORNO);
+        }
+    }
+
+    @Transactional
+    public void cerrarRepartoLocal(Long envioId, String repartidorSub, Instant fechaFin) {
+        Envio envio = buscarParaActualizar(envioId);
+        validarRepartidorAsignado(envio, repartidorSub);
+
+        if (envio.getEstado() == EstadoEnvio.CERRADO) {
+            return;
+        }
+        if (envio.getEstado() != EstadoEnvio.PENDIENTE_RETORNO) {
+            throw new IllegalStateException("El envío debe estar en estado PENDIENTE_RETORNO para cerrarse");
+        }
+
+        envio.setFechaFin(Objects.requireNonNull(fechaFin));
+        envio.setEstado(EstadoEnvio.CERRADO);
+    }
+
+    private void validarRepartidorAsignado(Envio envio, String repartidorSub) {
+        if (repartidorSub == null || repartidorSub.isBlank()
+                || envio.getAsignacion() == null
+                || !Objects.equals(envio.getAsignacion().getRepartidorSub(), repartidorSub)) {
+            throw new AccessDeniedException("El envío no está asignado al repartidor autenticado");
+        }
+    }
+
+    private void validarEnvioId(Long envioId) {
+        if (envioId == null || envioId <= 0) {
+            throw new IllegalArgumentException("El ID del envío debe ser positivo");
+        }
     }
 
     @Transactional
@@ -241,6 +347,6 @@ public class EnvioService {
 
     Envio buscarParaActualizar(Long envioId) {
         return repository.buscarParaActualizar(envioId)
-                .orElseThrow(() -> new IllegalArgumentException("No existe el envío " + envioId));
+                .orElseThrow(() -> new RecursoNoEncontradoException("No existe el envío " + envioId));
     }
 }

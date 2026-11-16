@@ -68,6 +68,14 @@ public class PaquetesClient {
                 .toBodilessEntity();
     }
 
+    public void cambiarEstadoPaquete(Long paqueteId, String estado) {
+        restClient.patch()
+                .uri("/interno/logistica/paquetes/{paqueteId}/estado", paqueteId)
+                .body(new EstadoPaqueteRequest(estado))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
     public record PaqueteResumen(
             Long id,
             Long sucursalId,
@@ -102,6 +110,8 @@ public class PaquetesClient {
             Long vehiculoId,
             Long repartidorId
     ) {}
+
+    public record EstadoPaqueteRequest(String estado) {}
 
     public record ReservaResponse(
             Long envioId,
