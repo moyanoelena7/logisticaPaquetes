@@ -5,9 +5,9 @@ spring:
   application:
     name: ms-paquetes
   datasource:
-    url: ${DB_URL:jdbc:mariadb://localhost:3307/bd_paquetes}
-    username: ${DB_USER}
-    password: ${DB_PASSWORD}
+    url: ${DB_URL:jdbc:mariadb://127.0.0.1:3307/bd_paquetes}
+    username: ${PAQUETES_DB_USER}
+    password: ${PAQUETES_DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: update

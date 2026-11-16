@@ -1,7 +1,10 @@
 services:
-  mariadb-db:
+  paquetes-db:
     ports:
-      - "3307:3306"
+      - "127.0.0.1:3307:3306"
+  logistica-db:
+    ports:
+      - "127.0.0.1:3308:3306"
   keycloak:
     ports:
       - "8180:8080"

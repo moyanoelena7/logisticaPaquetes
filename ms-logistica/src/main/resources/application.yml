@@ -5,9 +5,9 @@ spring:
   application:
     name: ms-logistica
   datasource:
-    url: ${DB_URL:jdbc:mariadb://localhost:3307/bd_logistica}
-    username: ${DB_USER}
-    password: ${DB_PASSWORD}
+    url: ${DB_URL:jdbc:mariadb://127.0.0.1:3308/bd_logistica}
+    username: ${LOGISTICA_DB_USER}
+    password: ${LOGISTICA_DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: update

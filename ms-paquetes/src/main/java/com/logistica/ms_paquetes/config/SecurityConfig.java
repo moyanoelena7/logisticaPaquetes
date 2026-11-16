@@ -38,7 +38,8 @@ public class SecurityConfig {
                     "/clientes", "/clientes/**",
                     "/vehiculos", "/vehiculos/**",
                     "/repartidores", "/repartidores/**",
-                    "/sucursales", "/sucursales/**"                ).hasRole("ADMINISTRADOR")
+                    "/sucursales", "/sucursales/**"
+                ).hasRole("ADMINISTRADOR")
 
                 // Un endpoint nuevo queda bloqueado hasta que se le asigne una regla.
                 .anyRequest().denyAll()

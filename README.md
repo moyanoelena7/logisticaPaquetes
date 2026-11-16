@@ -15,8 +15,9 @@ Backend de una empresa de logística de última milla. Registra paquetes, admini
 | `api-gateway` | Punto de entrada único. Valida el token y enruta a los microservicios. | 8080 |
 | `ms-paquetes` | Paquetes, clientes, vehículos, repartidores y sucursales. | 8081 |
 | `ms-logistica` | Envíos, asignaciones, rutas (integración con OSRM) y resultados de entrega. | 8082 |
-| `mariadb-db` | MariaDB con tres bases lógicas: `bd_paquetes`, `bd_logistica` y `bd_keycloak`. | 3306 |
-| `keycloak` | Autenticación y autorización (OAuth2 / OIDC, tokens JWT). | 8080 |
+| `paquetes-db` | Instancia MariaDB exclusiva de `ms-paquetes` con `bd_paquetes`. | 3306 |
+| `logistica-db` | Instancia MariaDB exclusiva de `ms-logistica` con `bd_logistica`. | 3306 |
+| `keycloak` | Autenticación y autorización (OAuth2 / OIDC, tokens JWT), con almacenamiento local de desarrollo. | 8080 |
 | `osrm` | Cálculo de rutas con OSRM (distancias, duraciones y geometría). Solo con `--profile osrm`. | 5000 |
 
 Los diagramas (C4, ER y proceso principal) están en `docs/`.
@@ -30,8 +31,7 @@ logistica-paquetes/
 ├── ms-logistica/         Microservicio de envíos y rutas
 │   └── osrm/             preparación de datos (prepare.ps1) y datos de OSRM
 ├── infra/
-│   ├── keycloak/         realm-logistica.json (se importa solo al arrancar)
-│   └── mariadb/init/     scripts SQL de inicialización
+│   └── keycloak/         realm-logistica.json (configuración inicial del realm)
 ├── docs/                 documentación y diagramas
 ├── postman/              colección y entorno de Postman (pendiente)
 ├── docker-compose.yml            configuración base
@@ -84,13 +84,16 @@ La primera vez tarda varios minutos: se descargan las imágenes y cada servicio 
 
 | Variable | Descripción |
 |---|---|
-| `MARIADB_ROOT_PASSWORD` | Contraseña del usuario root de MariaDB |
-| `DB_USER` | Usuario de base de datos que usan los servicios (ej. `logistica_app`). **Debe coincidir con el usuario del script `infra/mariadb/init/01-crear-bases.sql`** |
-| `DB_PASSWORD` | Contraseña de ese usuario |
+| `PAQUETES_DB_ROOT_PASSWORD` | Contraseña de root en `paquetes-db` |
+| `PAQUETES_DB_USER` / `PAQUETES_DB_PASSWORD` | Credenciales de aplicación para `bd_paquetes` |
+| `LOGISTICA_DB_ROOT_PASSWORD` | Contraseña de root en `logistica-db` |
+| `LOGISTICA_DB_USER` / `LOGISTICA_DB_PASSWORD` | Credenciales de aplicación para `bd_logistica` |
 | `KC_ADMIN_USER` | Usuario administrador de la consola de Keycloak |
 | `KC_ADMIN_PASSWORD` | Contraseña de ese administrador |
 
 El archivo `.env` **nunca se sube al repositorio** (está en `.gitignore`). Solo se versiona `.env.example`.
+
+Si ya usabas el MariaDB compartido, agregá a tu `.env` las seis variables nuevas de la plantilla y detené el contenedor anterior con `docker stop mariadb-db` si está ocupando el puerto `3307`. Las dos bases nuevas se inicializan vacías y el volumen anterior queda disponible para recuperar datos si los necesitás.
 
 ### Modos de ejecución
 
@@ -98,17 +101,18 @@ El archivo `.env` **nunca se sube al repositorio** (está en `.gitignore`). Solo
 # Desarrollo: usa docker-compose.yml + docker-compose.override.yml
 docker compose up --build -d
 
-# Solo el gateway expuesto (ignora el override)
+# Sin los puertos del override de desarrollo
 docker compose --file docker-compose.yml up --build -d
 ```
 
 | Servicio | URL en tu PC | Modo |
 |---|---|---|
-| API Gateway | http://localhost:8080 | siempre |
+| API Gateway | http://localhost:8080 | solo desarrollo |
 | ms-paquetes | http://localhost:8081 | solo desarrollo |
 | ms-logistica | http://localhost:8082 | solo desarrollo |
 | Keycloak | http://localhost:8180 | solo desarrollo |
-| MariaDB | localhost:3307 | solo desarrollo |
+| `paquetes-db` | `127.0.0.1:3307` | solo desarrollo |
+| `logistica-db` | `127.0.0.1:3308` | solo desarrollo |
 | OSRM | http://localhost:5000 | solo desarrollo (`--profile osrm`) |
 
 ### Comandos útiles
@@ -118,7 +122,6 @@ docker compose ps                         # estado de los contenedores
 docker compose logs -f ms-paquetes        # logs de un servicio
 docker compose up --build -d ms-paquetes  # reconstruir solo un servicio
 docker compose down                       # detener todo (conserva los datos)
-docker compose down -v                    # detener y BORRAR volúmenes (bases y realm)
 
 # OSRM: preparar datos (una sola vez) y levantar el servicio
 cd ms-logistica\osrm; .\prepare.ps1; cd ..\..
@@ -126,7 +129,7 @@ docker compose --profile osrm up -d
 docker compose logs -f osrm
 ```
 
-> **Importante:** los scripts de `infra/mariadb/init/` y el realm de Keycloak solo se aplican cuando el volumen está vacío. Si cambiás alguno de esos archivos, ejecutá `docker compose down -v` y volvé a levantar.
+Cada instancia MariaDB crea su base y usuario al inicializar su volumen. Keycloak importa el JSON cuando el realm `logistica` todavía no existe y guarda los cambios posteriores en `keycloak-data`. Editar el JSON de arranque no modifica un realm ya importado.
 
 ### OSRM (cálculo de rutas)
 
@@ -268,16 +271,18 @@ git merge origin/main
 Para iterar rápido, dejá la infraestructura en Docker y corré solo tu servicio desde la terminal o el IDE:
 
 ```powershell
-docker compose up -d mariadb-db keycloak
-docker compose stop ms-paquetes          # liberar el puerto (o ms-logistica)
+docker compose up -d paquetes-db keycloak
+docker compose stop ms-paquetes          # liberar el puerto de la aplicación
 
 cd ms-paquetes
-$env:DB_USER = "<valor de tu .env>"
-$env:DB_PASSWORD = "<valor de tu .env>"
+$env:PAQUETES_DB_USER = "<valor de tu .env>"
+$env:PAQUETES_DB_PASSWORD = "<valor de tu .env>"
 .\mvnw.cmd spring-boot:run
 ```
 
-Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (MariaDB) y `localhost:8180` (Keycloak). Mientras corras así, probá **directo contra `http://localhost:8081`** (o `8082`), porque el gateway de Docker enruta a los contenedores. Antes de abrir un PR verificá que también funcione dentro de Docker con `docker compose up --build -d <servicio>`.
+Para `ms-logistica`, levantá `logistica-db` y `keycloak`, detené el contenedor `ms-logistica` si está en ejecución, y usá `LOGISTICA_DB_USER` y `LOGISTICA_DB_PASSWORD` en su módulo. En ambos casos, configurá esas variables también en el IDE si arrancás desde ahí.
+
+Los valores por defecto son `127.0.0.1:3307` para `bd_paquetes`, `127.0.0.1:3308` para `bd_logistica` y `localhost:8180` para Keycloak. Probá directo contra la aplicación que levantaste en `http://localhost:8081` o `http://localhost:8082`, ya que el gateway de Docker enruta a los contenedores. Antes de abrir un PR verificá que también funcione dentro de Docker con `docker compose up --build -d <servicio>`.
 
 ---
 
@@ -316,7 +321,7 @@ Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (Ma
 ## Estado del proyecto
 
 - [x] Estructura del monorepo
-- [x] MariaDB con las bases `bd_paquetes`, `bd_logistica` y `bd_keycloak`
+- [x] Una instancia MariaDB y un volumen por microservicio de aplicación
 - [x] Keycloak con realm, roles y usuarios de prueba
 - [x] Seguridad JWT por rol en gateway y microservicios
 - [x] Microservicios y gateway en Docker Compose
@@ -334,8 +339,8 @@ Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (Ma
 |---|---|
 | `docker` no se reconoce como comando | Abrir Docker Desktop, esperar a que inicie y abrir una terminal nueva |
 | Keycloak no responde al principio | Esperar 1 a 3 minutos y revisar `docker compose logs keycloak` |
-| Error de acceso a la base (`Access denied`) | Verificar que `DB_USER` y `DB_PASSWORD` del `.env` coinciden con lo creado; si cambiaste algo, `docker compose down -v` |
-| Los cambios en el realm o en el SQL no se aplican | Solo corren con volumen vacío: `docker compose down -v` y levantar de nuevo |
+| Error de acceso a la base (`Access denied`) | Verificar las variables `PAQUETES_DB_*` o `LOGISTICA_DB_*` contra las credenciales con las que se inicializó el volumen. Editar `.env` no cambia los usuarios de una instancia ya creada. |
+| Los cambios del JSON del realm no se aplican | Actualizar el realm existente desde la consola de Keycloak. El JSON se usa para importar un realm que todavía no existe. |
 | 401 con un token que parecía válido | El token venció (5 minutos): pedir uno nuevo |
 | Un servicio da 404 en todas las rutas del gateway | Revisar las rutas en `api-gateway/src/main/resources/application.yml` |
 | Puerto ocupado al correr un servicio desde el IDE | Detener el contenedor correspondiente con `docker compose stop <servicio>` |

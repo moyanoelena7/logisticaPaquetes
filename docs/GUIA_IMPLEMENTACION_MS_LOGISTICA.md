@@ -15,7 +15,7 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 - Docker Compose configura MS_PAQUETES_URL=http://ms-paquetes:8081 y las URLs de issuer/JWKS.
 - OSRM se ejecuta como el servicio `osrm` de Docker Compose (imagen `ghcr.io/project-osrm/osrm-backend:v6.0.0`, algoritmo MLD) detrás del profile `osrm`. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`. Dentro de Docker, `OSRM_URL` es `http://osrm:5000`. Todavía no hay cliente HTTP ni lógica de rutas en el código de `ms-logistica`.
 - El gateway enruta /envios/** a ms-logistica. En desarrollo se publican los puertos de gateway y microservicios.
-- MariaDB tiene bases lógicas separadas: bd_paquetes, bd_logistica y bd_keycloak.
+- `ms-logistica` y `ms-paquetes` tienen sus propias instancias MariaDB. Keycloak importa el realm desde el JSON y conserva su estado de desarrollo en un volumen propio.
 
 ## Rama y límites de responsabilidad
 
@@ -145,7 +145,7 @@ Usar SLF4J con el ID de envío y operación cuando corresponda. No registrar JWT
 - Dentro de Docker, ms-paquetes debe resolverse como http://ms-paquetes:8081.
 - Mantener KEYCLOAK_ISSUER_URI y KEYCLOAK_JWK_SET_URI de Compose.
 - `OSRM_URL` ya está configurada en Compose como `http://osrm:5000`; fuera de Docker el `application.yml` usa `http://localhost:5000` (puerto publicado en el override). El servicio `osrm` requiere `docker compose --profile osrm up -d` y los datos de `ms-logistica/osrm/prepare.ps1`.
-- Usar bd_logistica y credenciales inyectadas desde el .env local.
+- Usar `bd_logistica` en `logistica-db:3306` dentro de Docker o `127.0.0.1:3308` desde el IDE. Configurar `LOGISTICA_DB_USER` y `LOGISTICA_DB_PASSWORD` con los valores del `.env` local.
 - ddl-auto:update es una facilidad de desarrollo; acordar migraciones/validación de esquema antes de producción.
 - Actuator expone health e info, pero la seguridad actual solo permite health. Decidir si info queda restringido o se deja de exponer.
 - Compose espera a MariaDB, no a que ms-logistica esté saludable. Esperar el inicio completo o definir healthcheck/readiness como tarea de infraestructura.
