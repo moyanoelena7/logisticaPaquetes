@@ -34,6 +34,12 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/envios")
                     .hasRole("ADMINISTRADOR")
 
+                .requestMatchers(HttpMethod.GET, "/envios/disponibilidad")
+                    .hasRole("ADMINISTRADOR")
+
+                .requestMatchers(HttpMethod.GET, "/envios/mias/rutas")
+                    .hasRole("REPARTIDOR")
+
                 .requestMatchers(HttpMethod.GET, "/envios/{id}/ruta")
                     .hasAnyRole("ADMINISTRADOR", "REPARTIDOR")
 

@@ -5,7 +5,7 @@ spring:
   application:
     name: ms-logistica
   datasource:
-    url: ${DB_URL:jdbc:mariadb://localhost:3307/bd_logistica}
+    url: ${DB_URL:jdbc:mariadb://localhost:3308/bd_logistica}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
   jpa:
@@ -18,6 +18,16 @@ spring:
         jwt:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/logistica}
           jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/logistica/protocol/openid-connect/certs}
+      client:
+        registration:
+          ms-paquetes:
+            provider: keycloak
+            client-id: ${MS_PAQUETES_CLIENT_ID:ms-logistica-service}
+            client-secret: ${MS_PAQUETES_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+        provider:
+          keycloak:
+            token-uri: ${KEYCLOAK_TOKEN_URI:http://localhost:8180/realms/logistica/protocol/openid-connect/token}
 
 
 app:

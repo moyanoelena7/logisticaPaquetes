@@ -142,8 +142,16 @@ Se dividirán en los siguientes microservicios:
 | ms-paquetes | Sucursales | GET | `/sucursales` | Consultar sucursales | Administrador |
 | ms-paquetes | Sucursales | POST | `/sucursales` | Registrar sucursal | Administrador |
 | ms-paquetes | Sucursales | PUT | `/sucursales` | Actualizar datos de sucursales | Administrador |
+| ms-paquetes | Integración interna | GET | `/interno/logistica/paquetes?ids={ids}` | Consultar ID, sucursal, sector y estado de entre 1 y 99 paquetes | MS-LOGISTICA |
+| ms-paquetes | Integración interna | GET | `/interno/logistica/vehiculos/disponibles?sucursalId={id}` | Consultar vehículos habilitados sin reserva activa para la sucursal | MS-LOGISTICA |
+| ms-paquetes | Integración interna | GET | `/interno/logistica/repartidores/disponibles?sucursalId={id}` | Consultar repartidores habilitados, vinculados a un `sub` y sin reserva activa | MS-LOGISTICA |
+| ms-paquetes | Integración interna | PUT | `/interno/logistica/envios/{envioId}/reserva` | Reservar atómicamente paquetes, vehículo y repartidor; el mismo `envioId` y los mismos datos devuelven la reserva existente | MS-LOGISTICA |
+| ms-paquetes | Integración interna | DELETE | `/interno/logistica/envios/{envioId}/reserva` | Liberar la reserva sin eliminar su historial; repetir la liberación es seguro | MS-LOGISTICA |
+| ms-paquetes | Integración interna | PATCH | `/interno/logistica/paquetes/{id}/estado` | Avanzar el estado de un paquete por la máquina de estados | MS-LOGISTICA |
 | ms-logistica | Envío | GET | `/envios?sector={sector}` | Buscar envios por sector | Administrador |
 | ms-logistica | Envío | GET | `/envios?estado={estado}` | Buscar envios por estado | Administrador |
+| ms-logistica | Asignación | GET | `/envios/disponibilidad?sucursalId={id}` | Consultar vehículos y repartidores libres en una sucursal | Administrador |
+| ms-logistica | Rutas | GET | `/envios/mias/rutas` | Consultar rutas asignadas al repartidor autenticado | Repartidor asignado |
 | ms-logistica | Envío | GET | `/envios/{id}` | Consultar un envío específico | Administrador o repartidor |
 | ms-logistica | Envío | POST | `/envios` | Crea un envío con paquetes en un sector | Administrador |
 | ms-logistica | Asignación | POST | `/envios/{id}/asignaciones` | Se le asigna a un envío los paquetes, vehículo y repartidor | Administrador |
@@ -173,13 +181,26 @@ Keycloak es el proveedor de identidad del sistema. El realm `logistica` define l
 - En `ms-logistica`, la creación de envíos, las asignaciones y el cálculo de rutas requieren `ADMINISTRADOR`. El inicio del reparto y el registro del resultado de entrega requieren `REPARTIDOR`. Las consultas de un envío o su ruta permiten ambos roles.
 - Una solicitud sin token válido debe recibir `401 Unauthorized`; un usuario autenticado sin el rol requerido debe recibir `403 Forbidden`. Las rutas no declaradas en las reglas de los microservicios se deniegan.
 
-Las reglas actuales verifican roles. La comprobación de que el repartidor autenticado tiene asignado el envío se implementará en `ms-logistica`. `ms-paquetes` ya registra el `username` del repartidor. La asignación usará el `sub` de Keycloak para verificar la identidad.
+Las reglas de rol no bastan para autorizar un recurso asignado. `GET /envios/mias/rutas` filtra por el `sub` del JWT y `GET /envios/{id}/ruta` compara ese `sub` con el guardado en la asignación; el administrador puede consultar cualquier ruta. Aplicar la misma comprobación a la consulta del envío, el inicio y el registro de resultados antes de habilitar esas operaciones al repartidor.
 
 ### Estado de implementación
 
 La configuración de seguridad, el enrutamiento del gateway, la conexión a MariaDB y la importación del realm de Keycloak están configurados. Se comprobó manualmente el acceso con un token de administrador a través del gateway. La matriz completa de casos `401`, `403` y accesos permitidos debe volver a comprobarse cuando estén implementados los endpoints reales.
 
-`ms-paquetes` ya tiene entidades, repositorios, servicios y controladores para clientes, sucursales, vehículos, repartidores y paquetes. Ya permite cambiar el estado de un paquete individual. Quedan pendientes el contrato interno de reserva y los endpoints de negocio de `ms-logistica`.
+`ms-paquetes` ya tiene entidades, repositorios, servicios y controladores para clientes, sucursales, vehículos, repartidores y paquetes, además del contrato interno de consulta de paquetes, disponibilidad, reserva y liberación para `ms-logistica`. La reserva se identifica por `envioId`, verifica atómicamente el estado de los paquetes, la disponibilidad de los recursos y la capacidad del vehículo. `ms-logistica` debe consumir estos endpoints mediante HTTP y guardar únicamente IDs externos; no debe acceder a la base de datos de `ms-paquetes`.
+
+El contrato interno actual no incluye operaciones de inicio, resultado de entrega, cierre, cancelación o reprogramación vinculadas a `envioId`. No asumir esos endpoints hasta acordarlos e implementarlos en `ms-paquetes`. El endpoint genérico de transición de estado no reemplaza un contrato que registre un intento idempotente asociado a un envío.
+
+### Consistencia y reintentos de asignación
+
+La asignación usa una secuencia síncrona con dos transacciones locales, sin mantener una transacción de base de datos abierta durante HTTP:
+
+1. `ms-logistica` envía a `PUT /interno/logistica/envios/{envioId}/reserva` el `sucursalId`, `sector`, IDs de paquete, `vehiculoId` y `repartidorId`. `ms-paquetes` confirma su propia transacción antes de responder.
+2. Ante `200 OK`, `ms-logistica` valida que la respuesta corresponda al mismo `envioId` y al mismo conjunto de paquetes, y que la reserva esté activa. Después, en una transacción local corta, confirma `Asignacion` y pasa `Envio` a `ASIGNADO`.
+3. Si hay timeout, error de transporte o falla al persistir localmente, el envío queda en `CREADO` y el cliente puede repetir la misma solicitud con exactamente los mismos datos. `ms-paquetes` devuelve la reserva existente; si cambian paquetes o recursos, responde `409 Conflict`.
+4. Si la primera confirmación local sí se guardó pero se perdió la respuesta a quien llamó a `ms-logistica`, el reintento vuelve a consultar la reserva y `ms-logistica` compara todos sus datos con la asignación guardada. Si coinciden, responde éxito sin volver a escribir ni retroceder el estado del envío. Si difieren o el envío fue cancelado, responde conflicto.
+
+La lista de paquetes y destinos se compara por `paqueteId`, nunca por orden. Un error remoto confirmado no debe crear asignación local; un timeout no debe liberar la reserva porque el resultado remoto es incierto. La liberación se realiza solo mediante el `DELETE` del contrato actual cuando corresponda al flujo de cierre acordado.
 
 ### Comprobaciones comprometidas
 
@@ -193,7 +214,7 @@ La configuración de seguridad, el enrutamiento del gateway, la conexión a Mari
 - Framework: Spring Boot 4.1.2 en los tres módulos. El API Gateway utiliza Spring Cloud Gateway Server WebFlux con Spring Cloud BOM 2025.1.4.
 - Construcción: Maven y Maven Wrapper; cada módulo genera una imagen Docker multi-stage.
 - Microservicios MVC: Spring WebMVC, Spring Data JPA, Hibernate, validación, Actuator y OAuth2 Resource Server.
-- Persistencia: MariaDB 11.8, con bases lógicas independientes `bd_paquetes` y `bd_logistica`. La misma instancia aloja `bd_keycloak` para Keycloak.
+- Persistencia: dos instancias MariaDB 11.8 con volúmenes separados. `paquetes-db` aloja `bd_paquetes`; `logistica-db` aloja `bd_logistica` y `bd_keycloak` para Keycloak. Cada instancia usa las credenciales específicas de su dominio definidas en `.env`.
 - Identidad: Keycloak 26.4, con el realm `logistica` importado desde `infra/keycloak/realm-logistica.json`.
 - Ruteo: OSRM se ejecuta como el servicio `osrm` de Docker Compose con la imagen oficial `ghcr.io/project-osrm/osrm-backend:v6.0.0` y algoritmo MLD. Se levanta con el profile `osrm` (`docker compose --profile osrm up -d`) para que `docker compose up` siga funcionando en equipos que no descargaron el mapa. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`, que descarga el extracto de OSM de la provincia de Córdoba (~40 MB) y ejecuta `osrm-extract`, `osrm-partition` y `osrm-customize` dentro de la misma imagen; el resultado (`cordoba.osrm*`, ~200 MB) queda en `ms-logistica/osrm/data/` y no se versiona. `ms-logistica` lee su URL desde `OSRM_URL`: en Docker se configura como `http://osrm:5000`, alcanzable por nombre de servicio; fuera de Docker el valor por defecto `http://localhost:5000` funciona porque el puerto se publica en el override. La etiqueta de la imagen y la del script deben coincidir, porque los archivos `.osrm.*` son binarios dependientes de la versión.
 
@@ -216,9 +237,9 @@ Desde la raíz del repositorio:
 2. Ejecutar `docker compose up --build -d`.
 3. Si se van a probar rutas, preparar los datos una vez (`ms-logistica\osrm\prepare.ps1`) y levantar `docker compose --profile osrm up -d`.
 4. Esperar a que las aplicaciones terminen de iniciar y comprobar sus logs. Compose espera a que MariaDB esté saludable, pero no tiene healthchecks para los microservicios ni el gateway.
-5. Usar el gateway en `http://localhost:8080`. Los puertos locales publicados para desarrollo son `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak), `3307` (MariaDB) y `5000` (OSRM), definidos en `docker-compose.override.yml`.
+5. Usar el gateway en `http://localhost:8080`. Los puertos locales publicados para desarrollo son `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak), `3307` (MariaDB de paquetes), `3308` (MariaDB de logística) y `5000` (OSRM), definidos en `docker-compose.override.yml`.
 
-El script `infra/mariadb/init/01-crear-bases.sql` crea las tres bases lógicas. Los servicios de aplicación usan las bases asignadas a sus dominios; Keycloak usa `bd_keycloak`.
+`paquetes-db` crea `bd_paquetes` y su usuario desde las variables `PAQUETES_DB_*`. `logistica-db` crea `bd_logistica` y el script `infra/mariadb/logistica-init/01-keycloak.sql` crea `bd_keycloak` y autoriza a `LOGISTICA_DB_USER`. Ese script solo se ejecuta al inicializar un volumen vacío.
 
 ## Colección de ejecutables (planificada)
 1. Herramienta y organización previstas: la entrega se realizará mediante un archivo JSON exportado de Postman (Colección v2.1) acompañado de un archivo de entorno (entorno-logistica-local.json). Estos artefactos todavía no están incluidos en el repositorio. La colección estará estructurada en carpetas numeradas para garantizar un flujo lógico de ejecución que refleje el proceso principal del negocio:
