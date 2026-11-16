@@ -29,7 +29,7 @@ Por esto, se busca reducir el tiempo de entrega de paquetes de forma que resulte
 > [!IMPORTANT]
 >Sistema de logística de paquetes que resuelva el envío de paquetes entre varios puntos de entrega, optimizando la distancia y tiempo de entrega por el camino más conveniente. Destinada a una empresa de logística estilo OCA para mejorar sus procesos de envío de paquetes, ahorrando recursos y sirviendo de guía para los repartidores para lograr su trabajo. Abarca desde la recepción de paquetes y su registro, la clasificación de estos por sectores de entrega, la asignación de cargas a los vehículos según capacidad y disponibilidad, la optimización de las rutas y el seguimiento del paquete.
 
-El principal aporte del sistema radica en la automatización del proceso de planificación operativa: consolida paquetes por sectores de entrega y aplica un algoritmo de ruteo inteligente que resuelve el trayecto más eficiente, considerando las restricciones físicas de la flota (límites de volumen y peso por vehículo) y la disponibilidad del personal asignado. Asimismo, garantiza la viabilidad del envío exigiendo un umbral mínimo de 6 paquetes por lote planificado.
+El administrador arma envíos por sucursal y sector, con al menos 6 paquetes por envío. El sistema valida los límites de volumen y peso del vehículo y la disponibilidad de los recursos elegidos. OSRM Trip ordena las entregas, con salida desde la sucursal y llegada al último destino que elige el motor.
 Como resultado concreto, la plataforma proveerá a los administradores una herramienta centralizada para la gestión de flota y paquetes, y generará automáticamente hojas de ruta secuenciadas paso a paso para los repartidores. Esto permitirá reducir el tiempo total en tránsito y minimizar el consumo de combustible y desgaste de vehículos.
 
 ## Actores
@@ -43,7 +43,7 @@ Como resultado concreto, la plataforma proveerá a los administradores una herra
 - Gestión del envío de paquetes por sectores.
 - Asignación de paquetes a vehículos según capacidad (volumen y peso) y disponibilidad. 
 - Gestión de seguimiento y registro de entrega. 
-- Optimización de la ruta según tiempo y distancia.
+- Optimización del orden de entrega según el tiempo de viaje, con distancia estimada del recorrido.
 
 No incluye:
 - Seguimiento por parte del cliente del paquete. 
@@ -59,28 +59,27 @@ No incluye:
 | F-03 | Gestionar Sucursal | Administrador | Registrar, consultar, modificar y desactivar sucursales, incluyendo sus datos de identificación, dirección y sector asociado. | Las sucursales quedan disponibles para organizar paquetes y planificar envíos por sector. | MEDIA |
 | F-04 | Gestionar paquetes | Administrador | Registrar y actualizar el estado de los paquetes | El paquete queda registrado y puede incluirse en la planificación de envíos | ALTA |
 | F-05 | Asignar paquete a vehículo | Administrador | Gestionar los paquetes a los vehículos según capacidad y disponibilidad | Paquetes asignados a los vehículo para poder realizar el envío | ALTA |
-| F-06 | Planificar rutas de entrega | Administrador | Planificar las rutas de entrega según el sector para minimizar el recorrido. | Se muestra una secuencia de puntos de entrega y la ruta propuesta. | ALTA |
+| F-06 | Planificar rutas de entrega | Administrador | Calcular con OSRM Trip el orden de las entregas desde la sucursal. | Se muestran las paradas, la ruta abierta, su distancia y su duración estimada. | ALTA |
 | F-07 | Gestionar el ordenamiento de paquetes por sector | Administrador | Gestionar cómo se ordenarán los paquetes según el sector de envio | Se muestra los paquetes ordenados por sector para realizar el envío | ALTA |
 | F-08 | Consultar ruta | Repartidor | Consulta la ruta que debe realizar para entregar los paquetes | Visualizacion e indicaciones sobre la ruta especifica que se consulta | ALTA |
-| F-09 | Actualizar estado de envío | Repartidor | Actualizar el estado del envío desde el momento que salio hasta el momento de entrega | Estado de el envío actualizado por el repartidor (Posibles estados: Pendiente, En camino, Entregado) | ALTA |
+| F-09 | Gestionar el reparto | Repartidor | Iniciar el envío asignado y confirmar el retorno a la sucursal y la disponibilidad al terminar. | El envío pasa a `EN_CAMINO` al iniciar y a `CERRADO` al confirmar el retorno. | ALTA |
 | F-10 | Registrar estado de la entrega | Repartidor | Registrar si el paquete fue entregado o si no pudo concretarse la entrega | Queda guardado el resultado y el momento del intento. | ALTA |
 
 ## Reglas de negocio
 
 - Se deberá indicar el alto, ancho, largo y peso del paquete al registrarlo.
-- El peso y dimensión del paquete no deberá sobrepasar el límite establecido por vehículo.
-- Se deberá asignar un peso máximo que podrá cargar el vehiculo
-- Se podrá asignar a los envíos a repartidores que se encuentran disponibles.
-- Se podrá asignar paquetes a vehículos si se encuentran disponibles.
+- El peso y el volumen totales de la carga deben respetar las capacidades del vehículo. El MVP controla el volumen agregado en m³. La comprobación de que un bulto cabe físicamente requeriría las dimensiones útiles del vehículo.
+- El administrador elige un vehículo y un repartidor disponibles de la sucursal del envío. `ms-paquetes` vuelve a validar la disponibilidad y la carga al reservar los recursos.
 - Se podrá consultar el estado del envío en cualquier momento que el repartidor desee.
 - Cada paquete deberá tener indicado una dirección de envío (como coordenadas: latitud y longitud)
 - Cada paquete deberá poder identificarse con un ID único.
 - Cada paquete deberá contener el nombre del cliente.
-- Cada paquete deberá pertenecer a un envío y a un sector de entrega.
-- Un envío debe tener al menos 6 paquetes para poder planificarse.
-- Solo se podrán planificar envíos con paquetes PENDIENTE, es decir que hayan llegado a la sucursal y hayan sido registrados por el administrador esperando a ser entregados.
-- La ruta planificada deberá incluir los destinos de todos los paquetes asignados al envío.
-- El paquete tendrá los siguientes estados válidos (PENDIENTE, ASIGNADO, EN_CAMINO, ENTREGADO, INCIDENCIA)
+- Cada paquete pertenece a una sucursal y un sector. Un envío agrupa entre 6 y 99 paquetes distintos de la misma sucursal y sector.
+- Los paquetes deben estar `PENDIENTE` al crear el borrador y al reservar la carga. La reserva confirma su estado `ASIGNADO`. Un paquete solo puede tener una reserva activa.
+- La ruta se calcula una vez confirmada la asignación. Sale de la sucursal e incluye todos los destinos del envío. Trip elige la última entrega.
+- El envío sigue `CREADO → ASIGNADO → PLANIFICADO → EN_CAMINO → PENDIENTE_RETORNO → CERRADO`. El administrador puede cancelar antes del inicio.
+- Los estados del paquete son `PENDIENTE`, `ASIGNADO`, `EN_CAMINO`, `ENTREGADO` e `INCIDENCIA`. Cada intento guarda el resultado y, si corresponde, el motivo de la incidencia.
+- Después del último intento, el vehículo y el repartidor permanecen reservados hasta que el repartidor confirma el retorno a la sucursal y la disponibilidad. Tras el cierre, el administrador puede reprogramar un paquete con incidencia y devolverlo a `PENDIENTE` manteniendo el intento original.
 
 ## Diseño de la arquitectura
 Se dividirán en los siguientes microservicios:
@@ -204,17 +203,18 @@ La tabla de APIs define el contrato comprometido. Las entidades, repositorios, s
 - Framework: Spring Boot 4.1.2 en los tres módulos. El API Gateway utiliza Spring Cloud Gateway Server WebFlux con Spring Cloud BOM 2025.1.4.
 - Construcción: Maven y Maven Wrapper; cada módulo genera una imagen Docker multi-stage.
 - Microservicios MVC: Spring WebMVC, Spring Data JPA, Hibernate, validación, Actuator y OAuth2 Resource Server.
-- Persistencia: MariaDB 11.8, con bases lógicas independientes `bd_paquetes` y `bd_logistica`. La misma instancia aloja `bd_keycloak` para Keycloak.
-- Identidad: Keycloak 26.4, con el realm `logistica` importado desde `infra/keycloak/realm-logistica.json`.
-- Ruteo: OSRM es un servicio externo previsto para la integración. No está definido como servicio en el Docker Compose actual y su desarrollo/configuración de ejecución corresponde al integrante asignado. `ms-logistica` lee su URL desde `OSRM_URL`; en Docker debe configurarse con una dirección alcanzable desde el contenedor, no con `localhost` salvo que OSRM corra dentro de ese mismo contenedor.
+- Persistencia. `ms-paquetes` y `ms-logistica` usan instancias MariaDB 11.8 independientes. Cada una tiene su base (`bd_paquetes` o `bd_logistica`), usuario de aplicación, volumen y red con su microservicio.
+- Identidad. Keycloak 26.4 importa el realm `logistica` desde `infra/keycloak/realm-logistica.json` y conserva su estado en el volumen `keycloak-data` mediante su almacenamiento de desarrollo `dev-file`.
+- Ruteo: OSRM se ejecuta como el servicio `osrm` de Docker Compose con la imagen oficial `ghcr.io/project-osrm/osrm-backend:v6.0.0` y algoritmo MLD. Se levanta con el profile `osrm` (`docker compose --profile osrm up -d`) para que `docker compose up` siga funcionando en equipos que no descargaron el mapa. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`, que descarga el extracto de OSM de la provincia de Córdoba (~40 MB) y ejecuta `osrm-extract`, `osrm-partition` y `osrm-customize` dentro de la misma imagen; el resultado (`cordoba.osrm*`, ~200 MB) queda en `ms-logistica/osrm/data/` y no se versiona. `ms-logistica` lee su URL desde `OSRM_URL`: en Docker se configura como `http://osrm:5000`, alcanzable por nombre de servicio; fuera de Docker el valor por defecto `http://localhost:5000` funciona porque el puerto se publica en el override. La etiqueta de la imagen y la del script deben coincidir, porque los archivos `.osrm.*` son binarios dependientes de la versión.
 
 ### Configuración por entorno
 
 Cada módulo tiene un `application.yml` y recibe la configuración de ejecución mediante variables de entorno. No existen actualmente archivos `application-dev.yml` ni `application-prod.yml`; la configuración local se orquesta con Docker Compose y `.env`.
 
 - `.env.example` enumera las variables locales requeridas. Cada integrante crea su propio `.env`; `.env` está excluido de Git.
-- Compose configura las conexiones JDBC y credenciales de MariaDB, el issuer/JWKS de Keycloak y las URLs internas entre servicios.
+- Compose configura las conexiones JDBC y las credenciales por servicio con `PAQUETES_DB_*` y `LOGISTICA_DB_*`. También configura el issuer/JWKS de Keycloak y las URLs internas entre servicios.
 - `MS_PAQUETES_URL` y `MS_LOGISTICA_URL` deben usar los nombres DNS de los servicios dentro de Docker (`ms-paquetes:8081` y `ms-logistica:8082`).
+- `OSRM_URL` debe apuntar a `http://osrm:5000` dentro de Docker. Fuera de Docker, `application.yml` usa `http://localhost:5000`, que funciona porque `docker-compose.override.yml` publica el puerto 5000. El servicio `osrm` no arranca con `docker compose up`: depende del profile `osrm` y de tener los datos de mapa preparados.
 - El issuer JWT configurado es `http://localhost:8180/realms/logistica`; los contenedores obtienen las claves por `http://keycloak:8080/realms/logistica/protocol/openid-connect/certs`.
 - `spring.jpa.hibernate.ddl-auto` está configurado como `update` para desarrollo local; antes de un entorno productivo deberá definirse una estrategia de migraciones y validación de esquema.
 
@@ -224,10 +224,11 @@ Desde la raíz del repositorio:
 
 1. Crear `.env` tomando `.env.example` como referencia.
 2. Ejecutar `docker compose up --build -d`.
-3. Esperar a que las aplicaciones terminen de iniciar y comprobar sus logs. Compose espera a que MariaDB esté saludable, pero no tiene healthchecks para los microservicios ni el gateway.
-4. Usar el gateway en `http://localhost:8080`. Los puertos locales publicados para desarrollo son `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak) y `3307` (MariaDB), definidos en `docker-compose.override.yml`.
+3. Si se van a probar rutas, preparar los datos una vez (`ms-logistica\osrm\prepare.ps1`) y levantar `docker compose --profile osrm up -d`.
+4. Esperar a que las aplicaciones terminen de iniciar y comprobar sus logs. Cada microservicio espera a que su instancia MariaDB esté saludable.
+5. Usar el gateway en `http://localhost:8080`. Los demás puertos locales de desarrollo se definen en `docker-compose.override.yml`: `8081` (`ms-paquetes`), `8082` (`ms-logistica`), `8180` (Keycloak), `3307` (`paquetes-db`), `3308` (`logistica-db`) y `5000` (OSRM).
 
-El script `infra/mariadb/init/01-crear-bases.sql` crea las tres bases lógicas. Los servicios de aplicación usan las bases asignadas a sus dominios; Keycloak usa `bd_keycloak`.
+La imagen de MariaDB crea la base y el usuario de cada instancia la primera vez que inicializa su volumen. Hibernate crea las tablas del microservicio en esa instancia.
 
 ## Colección de ejecutables (planificada)
 1. Herramienta y organización previstas: la entrega se realizará mediante un archivo JSON exportado de Postman (Colección v2.1) acompañado de un archivo de entorno (entorno-logistica-local.json). Estos artefactos todavía no están incluidos en el repositorio. La colección estará estructurada en carpetas numeradas para garantizar un flujo lógico de ejecución que refleje el proceso principal del negocio:
@@ -257,7 +258,7 @@ El script `infra/mariadb/init/01-crear-bases.sql` crea las tres bases lógicas. 
 2. Funcionalidades obligatorias
    - Gestión del dominio: Alta y registro de paquetes (con destino, peso y dimensiones), sucursales, vehículos y repartidores.
    - Asignación de recursos: Asignación de paquetes a recursos disponibles (vehículo y repartidor), validando estrictamente la compatibilidad de la carga (capacidad de peso y volumen) con cada vehículo y según el sector de entrega que cubrirá el vehículo.
-   - Planificación: Trazado de rutas por tiempo y distancia, devolviendo la ruta más eficiente.
+   - Planificación: OSRM Trip propone el orden de las entregas según el tiempo de viaje y devuelve distancia, duración y recorrido.
    - Gestión operativa: Consulta del recorrido asignado y registro del resultado de entrega (éxito o motivo de fallo) por parte del repartidor.
 3. Integraciones relevantes y Arquitectura
    - Arquitectura: La solución estará organizada en ms-paquetes, ms-logística y un api-gateway.
