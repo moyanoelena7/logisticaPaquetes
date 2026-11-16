@@ -127,7 +127,7 @@ Se dividirán en los siguientes microservicios:
 | Microservicio | Recurso | Método HTTP | Endpoint | Operación | Seguridad |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | ms-paquetes | Paquetes | POST | `/paquetes` | Registrar un paquete con destino,peso y dimensiones | Administrador |
-| ms-paquetes | Paquetes | GET | `/paquetes/{id}` | Consultar un paquete específico | Administrador o repartidor asignado |
+| ms-paquetes | Paquetes | GET | `/paquetes/{id}` | Consultar un paquete específico | Administrador |
 | ms-paquetes | Paquetes | GET | `/paquetes?estado={estado}` | Consultar estado de paquete específico | Administrador |
 | ms-paquetes | Paquetes | GET | `/paquetes?sector={sector}` | Consultar sector de paquete específico | Administrador |
 | ms-paquetes | Paquetes | GET | `/paquetes?estado={estado}&sector={sector}` | Consultar estado y sector de paquete específico | Administrador |
@@ -139,6 +139,12 @@ Se dividirán en los siguientes microservicios:
 | ms-paquetes | Vehículos | PUT | `/vehiculos/{id}` | Actualizar datos o capacidad de un vehículo | Administrador |
 | ms-paquetes | Repartidor | POST | `/repartidores` | Registrar repartidor | Administrador |
 | ms-paquetes | Repartidor | GET | `/repartidores?disponible=true` | Consultar repartidores disponibles | Administrador |
+| ms-paquetes | Integración interna | GET | `/interno/logistica/paquetes?ids={ids}` | Consultar datos básicos de paquetes para un borrador | MS-LOGISTICA |
+| ms-paquetes | Integración interna | PATCH | `/interno/logistica/paquetes/{id}/estado` | Avanzar un estado de paquete mediante la máquina de estados | MS-LOGISTICA |
+| ms-paquetes | Integración interna | GET | `/interno/logistica/vehiculos/disponibles?sucursalId={id}` | Consultar vehículos libres operativamente | MS-LOGISTICA |
+| ms-paquetes | Integración interna | GET | `/interno/logistica/repartidores/disponibles?sucursalId={id}` | Consultar repartidores libres operativamente | MS-LOGISTICA |
+| ms-paquetes | Integración interna | PUT | `/interno/logistica/envios/{envioId}/reserva` | Reservar paquetes, vehículo y repartidor en una transacción | MS-LOGISTICA |
+| ms-paquetes | Integración interna | DELETE | `/interno/logistica/envios/{envioId}/reserva` | Liberar recursos al cerrar el envío | MS-LOGISTICA |
 | ms-paquetes | Repartidor | PUT | `/repartidores/{id}` | Actualizar datos de repartidor | Administrador |
 | ms-paquetes | Sucursales | GET | `/sucursales` | Consultar sucursales | Administrador |
 | ms-paquetes | Sucursales | POST | `/sucursales` | Registrar sucursal | Administrador |
@@ -156,6 +162,10 @@ Se dividirán en los siguientes microservicios:
 Una solicitud PATCH en una API (siguiendo el estándar HTTP) se utiliza para realizar modificaciones parciales en un recurso existente
 En lugar de enviar el objeto completo para actualizarlo, con PATCH solo envías los campos o atributos específicos que deseas cambiar, dejando el resto de los datos intactos.
 
+Los endpoints `/interno/logistica/**` no se publican en el API Gateway y solo aceptan el rol técnico `MS-LOGISTICA`. La reserva se persiste en ms-paquetes por `envioId`; consultas de disponibilidad por sí solas no reservan recursos.
+
+El sector `CENTRAL` representa el destino/zona de entrega y es distinto de la sucursal de origen. Una sucursal se marca con `esCentral`; los paquetes nuevos y las reservas solo aceptan esa sucursal activa. En la base de desarrollo se marcó como central `Sucursal Centro` (id 1); los paquetes históricos de otras sucursales no se trasladan automáticamente.
+
 ## Arquitectura Librería Común
 
 Para el MVP no se implementará una librería común. ms-paquetes y ms-logistica tienen responsabilidades diferenciadas y, por el momento, no se identificaron componentes de dominio que deban compartir. La comunicación entre ambos se realizará mediante sus APIs.
@@ -165,22 +175,22 @@ La gestión de paquetes, vehículos, repartidores y sucursales permanecerá en m
 
 ### Seguridad configurada
 
-Keycloak es el proveedor de identidad del sistema. El realm `logistica` define los roles `ADMINISTRADOR` y `REPARTIDOR`, y emite tokens JWT.
+Keycloak es el proveedor de identidad del sistema. El realm `logistica` define `ADMINISTRADOR`, `REPARTIDOR` y el rol técnico `MS-LOGISTICA`, y emite tokens JWT.
 
 - El API Gateway actúa como Resource Server: valida el JWT y exige autenticación para las solicitudes enrutadas. La comprobación de la firma usa el endpoint JWKS interno de Keycloak; el claim `iss` se valida contra el issuer publicado por el realm.
 - `ms-paquetes` y `ms-logistica` también actúan como Resource Servers y validan los JWT de forma independiente. Los microservicios aplican los permisos por método HTTP y ruta.
-- Los roles del realm se leen desde `realm_access.roles` y se convierten a autoridades `ROLE_ADMINISTRADOR` y `ROLE_REPARTIDOR`.
-- En `ms-paquetes`, la administración de paquetes, vehículos, repartidores y sucursales requiere `ADMINISTRADOR`. La consulta de un paquete por ID permite ambos roles.
+- Los roles del realm se leen desde `realm_access.roles` y se convierten a autoridades `ROLE_ADMINISTRADOR`, `ROLE_REPARTIDOR` y `ROLE_MS-LOGISTICA`.
+- En `ms-paquetes`, las rutas públicas de gestión requieren `ADMINISTRADOR`. Las rutas `/interno/logistica/**` requieren `MS-LOGISTICA`; `GET /paquetes/{id}` no admite tokens de repartidor.
 - En `ms-logistica`, la creación de envíos, las asignaciones y el cálculo de rutas requieren `ADMINISTRADOR`. El inicio del reparto y el registro del resultado de entrega requieren `REPARTIDOR`. Las consultas de un envío o su ruta permiten ambos roles.
 - Una solicitud sin token válido debe recibir `401 Unauthorized`; un usuario autenticado sin el rol requerido debe recibir `403 Forbidden`. Las rutas no declaradas en las reglas de los microservicios se deniegan.
 
-Las reglas actuales verifican roles, pero todavía no verifican que el envío consultado o actualizado esté asignado al repartidor autenticado. Esa autorización sobre el recurso debe implementarse en la lógica de `ms-logistica` cuando existan las entidades y relaciones del dominio. Del mismo modo, `ms-paquetes` todavía no vincula una identidad de Keycloak con la entidad Repartidor.
+Las reglas de rol no prueban que un envío consultado o actualizado esté asignado al repartidor autenticado. Esa autorización sobre el recurso corresponde a la lógica de `ms-logistica`. En `ms-paquetes`, `Repartidor` se vincula al claim estable `sub` mediante `keycloakSub`; los registros existentes deben completar ese valor antes de poder reservar al repartidor.
 
 ### Estado de implementación
 
-La configuración de seguridad, el enrutamiento del gateway, la conexión a MariaDB y la importación del realm de Keycloak están configurados. Se comprobó manualmente el acceso con un token de administrador a través del gateway. La matriz completa de casos `401`, `403` y accesos permitidos debe volver a comprobarse cuando estén implementados los endpoints reales.
+La configuración de seguridad, el enrutamiento del gateway, la conexión a MariaDB y la importación del realm de Keycloak están configurados. `ms-paquetes` implementa las entidades y APIs públicas de clientes, sucursales, vehículos, repartidores y paquetes, además de consultas y reservas internas para logística. El contrato de reserva todavía requiere validación integral contra MariaDB y la integración real con `ms-logistica`.
 
-La tabla de APIs de esta sección define el contrato comprometido, no endpoints ya implementados. Actualmente los módulos todavía no contienen entidades, repositorios, servicios ni controladores de negocio.
+La tabla de APIs define el contrato comprometido. Las entidades, repositorios, servicios y controladores principales de `ms-paquetes` están implementados. El dominio de envíos y la orquestación de llamadas remotas corresponden a `ms-logistica`.
 
 ### Comprobaciones comprometidas
 

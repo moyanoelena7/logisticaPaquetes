@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -29,18 +28,18 @@ public class SecurityConfig {
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers("/actuator/health").permitAll()
 
-                // La regla específica va antes de la regla general de paquetes.
-                .requestMatchers(HttpMethod.GET, "/paquetes/{id}")
-                    .hasAnyRole("ADMINISTRADOR", "REPARTIDOR")
+                // Cuenta técnica: solo contratos internos de logística.
+                .requestMatchers("/interno/logistica/**").hasRole("MS-LOGISTICA")
 
+                // Toda la API pública de gestión permanece bajo rol administrativo.
                 .requestMatchers(
-                    "/paquetes", "/paquetes/**",
-                    "/clientes", "/clientes/**",
-                    "/vehiculos", "/vehiculos/**",
-                    "/repartidores", "/repartidores/**",
-                    "/sucursales", "/sucursales/**"                ).hasRole("ADMINISTRADOR")
+                        "/paquetes", "/paquetes/**",
+                        "/clientes", "/clientes/**",
+                        "/vehiculos", "/vehiculos/**",
+                        "/repartidores", "/repartidores/**",
+                        "/sucursales", "/sucursales/**"
+                ).hasRole("ADMINISTRADOR")
 
-                // Un endpoint nuevo queda bloqueado hasta que se le asigne una regla.
                 .anyRequest().denyAll()
             )
             .oauth2ResourceServer(oauth2 -> oauth2

@@ -27,6 +27,8 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_DB: mariadb
       KC_DB_URL: jdbc:mariadb://mariadb-db:3306/bd_keycloak
       KC_DB_USERNAME: ${DB_USER}
@@ -68,8 +70,11 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb-db:3306/bd_logistica
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      MS_PAQUETES_URL: http://ms-paquetes:8081
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.mariadb.jdbc.Driver
+      MS_PAQUETES_URL: ${MS_PAQUETES_URL:-http://ms-paquetes:8081}
+      MS_PAQUETES_CLIENT_ID: ${MS_PAQUETES_CLIENT_ID}
+      MS_PAQUETES_CLIENT_SECRET: ${MS_PAQUETES_CLIENT_SECRET}
+      KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/token
       KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
     depends_on:
@@ -89,7 +94,7 @@ services:
     environment:
       KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
-      MS_PAQUETES_URL: http://ms-paquetes:8081
+      MS_PAQUETES_URL: ${MS_PAQUETES_URL:-http://ms-paquetes:8081}
       MS_LOGISTICA_URL: http://ms-logistica:8082
     depends_on:
       - ms-paquetes

@@ -10,10 +10,11 @@ public record SucursalResponse(
         String direccion,
         BigDecimal latitud,
         BigDecimal longitud,
-        boolean activo
+        boolean activo,
+        boolean esCentral
 ) {
     public static SucursalResponse from(Sucursal s) {
         return new SucursalResponse(s.getId(), s.getNombre(), s.getDireccion(),
-                s.getLatitud(), s.getLongitud(), s.isActivo());
+                s.getLatitud(), s.getLongitud(), s.isActivo(), s.isEsCentral());
     }
 }

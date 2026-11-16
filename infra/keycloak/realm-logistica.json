@@ -6,7 +6,8 @@
   "roles": {
     "realm": [
       { "name": "ADMINISTRADOR", "description": "Gestiona paquetes, flota, envios y rutas" },
-      { "name": "REPARTIDOR", "description": "Consulta rutas asignadas y registra entregas" }
+      { "name": "REPARTIDOR", "description": "Consulta rutas asignadas y registra entregas" },
+      { "name": "MS-LOGISTICA", "description": "Cuenta técnica de ms-logistica para consumir endpoints internos de ms-paquetes" }
     ]
   },
   "clients": [
@@ -18,6 +19,20 @@
       "publicClient": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": true
+    },
+    {
+      "clientId": "ms-logistica-service",
+      "name": "Cuenta técnica ms-logistica",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": false
     }
   ],
   "users": [
@@ -40,6 +55,12 @@
       "email": "repartidor@logistica.local",
       "credentials": [{ "type": "password", "value": "repartidor123", "temporary": false }],
       "realmRoles": ["REPARTIDOR"]
+    },
+    {
+      "username": "service-account-ms-logistica-service",
+      "enabled": true,
+      "serviceAccountClientId": "ms-logistica-service",
+      "realmRoles": ["MS-LOGISTICA"]
     }
   ]
 }

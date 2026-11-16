@@ -29,7 +29,7 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 - El DER actual ubica estado_entrega, fecha_intento y observacion_incidencia en PARADA_RUTA. También se había considerado una entidad ResultadoEntrega. Definir una sola representación o una relación explícita, evitando duplicar el resultado.
 - Unificar estados del envío, del paquete y del resultado. La documentación mezcla EN_CAMINO y EN_TRANSITO y menciona REPROGRAMADO/RETORNO sin incluirlos en todos los catálogos.
 - Precisar si el mínimo de seis paquetes aplica por envío planificado o por lote/sector y mantener la regla igual en servicios y pruebas.
-- Acordar con ms-paquetes cómo consultar y cambiar estados de paquetes y cómo reservar/liberar vehículos y repartidores. El contrato API actual contiene consultas de disponibilidad, pero no define todas las transiciones de paquetes necesarias para el proceso.
+- El contrato interno con ms-paquetes está definido en la sección **Integración con ms-paquetes**. Las reservas son atómicas y pertenecen a ms-paquetes; ms-logistica conserva la asignación local solo después de recibir 200 OK.
 
 ## Modelo y persistencia
 
@@ -103,14 +103,26 @@ Cuando exista una llamada real a ms-paquetes, configurar un RestClient con app.m
 
 ## Integración con ms-paquetes
 
-Antes de codificar el cliente, acordar DTOs y errores para:
+ms-paquetes es el dueño de paquetes, vehículos, repartidores y de la reserva que protege esos recursos de asignaciones simultáneas. ms-logistica mantiene su envío y su asignación local, pero no escribe en la base de ms-paquetes.
 
-- Consultar paquetes, coordenadas, dimensiones y pesos por uno o varios IDs.
-- Consultar vehículos y repartidores disponibles.
-- Reservar/liberar recursos y actualizar el estado de los paquetes.
-- Manejar ID inexistente, estado no elegible, no disponibilidad y fallos del servicio.
+| Método | Endpoint interno | Uso |
+|---|---|---|
+| GET | `/interno/logistica/paquetes?ids=1,2,...` | Devuelve `id`, `sucursalId`, `sector` y `estado` para los IDs pedidos. |
+| PATCH | `/interno/logistica/paquetes/{id}/estado` | Aplica una transición de estado válida; responde `422` si la transición no está permitida. |
+| GET | `/interno/logistica/vehiculos/disponibles?sucursalId={id}` | Devuelve vehículos habilitados administrativamente y sin reserva activa en esa sucursal. |
+| GET | `/interno/logistica/repartidores/disponibles?sucursalId={id}` | Devuelve repartidores habilitados, con `sub` vinculado y sin reserva activa en esa sucursal. |
+| PUT | `/interno/logistica/envios/{envioId}/reserva` | Reserva atómicamente entre 6 y 99 paquetes distintos, un vehículo y un repartidor. |
+| DELETE | `/interno/logistica/envios/{envioId}/reserva` | Libera la reserva al cerrar el envío; repetirlo es seguro. |
 
-Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a errores de aplicación claros. Configurar timeout. Limitar reintentos a operaciones idempotentes, principalmente GET; no repetir POST/PATCH sin idempotencia.
+El cuerpo del PUT contiene `{ "sucursalId": 1, "sector": "CENTRAL", "paqueteIds": [1, 2, 3, 4, 5, 6], "vehiculoId": 1, "repartidorId": 1 }`. La respuesta `200 OK` incluye `envioId`, estado activo, IDs de recursos y paquetes, `repartidorSub`, peso y volumen totales, sucursal de origen y destinos con coordenadas. Un reintento del mismo `envioId` con los mismos datos devuelve la reserva existente; con datos distintos devuelve `409 Conflict`. ms-paquetes serializa llamadas simultáneas con el mismo `envioId` mediante una fila técnica de bloqueo y conserva la reserva como registro de idempotencia; no es una tabla de operaciones pendientes.
+
+Antes de reservar, ms-paquetes vuelve a validar sucursal, sector y estado `PENDIENTE`; bloquea las filas involucradas y verifica habilitación administrativa, reservas activas y capacidad de peso/volumen con `BigDecimal`. El volumen se calcula como `altoCm × anchoCm × largoCm ÷ 1.000.000`. La reserva activa se libera cuando ms-logistica cierra el envío. Los booleanos `disponible` de vehículo y repartidor siguen siendo la habilitación administrativa; la disponibilidad operativa requiere además que no haya reserva activa.
+
+Las operaciones internas requieren el rol de servicio `MS-LOGISTICA` y viven bajo `/interno/logistica/**`, prefijo que no está publicado por el gateway. El repartidor consulta destinos a través de ms-logistica; ms-logistica debe comprobar que el `sub` autenticado corresponde al repartidor asignado al envío antes de responder o registrar resultados.
+
+Los estados de paquete siguen `PENDIENTE → ASIGNADO → EN_CAMINO → ENTREGADO` o `INCIDENCIA`. La cuenta técnica cambia los estados por el endpoint interno; ms-logistica no debe reenviar el token del repartidor a ms-paquetes. La liberación de la reserva se solicita al cerrar el envío y no borra el historial ni retrocede los estados de los paquetes.
+
+Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a errores de aplicación claros. Configurar timeout. No repetir el PUT con datos cambiados; para completar un reintento posterior a un timeout, repetir el mismo `envioId` y exactamente los mismos datos. La llamada HTTP debe quedar fuera de la transacción local de ms-logistica.
 
 ## Integración OSRM
 

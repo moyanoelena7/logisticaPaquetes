@@ -6,6 +6,6 @@ final class EstadoIncidencia implements EstadoPaqueteState {
 
     @Override
     public Set<EstadoPaquete> transicionesPermitidas() {
-        return Set.of(EstadoPaquete.PENDIENTE);
+        return Set.of();
     }
 }

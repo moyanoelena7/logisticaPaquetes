@@ -7,11 +7,12 @@ public record RepartidorResponse(
         String nombre,
         String telefono,
         String username,
+        String keycloakSub,
         Long sucursalId,
         boolean disponible
 ) {
     public static RepartidorResponse from(Repartidor r) {
         return new RepartidorResponse(r.getId(), r.getNombre(), r.getTelefono(),
-                r.getUsername(), r.getSucursal().getId(), r.isDisponible());
+                r.getUsername(), r.getKeycloakSub(), r.getSucursal().getId(), r.isDisponible());
     }
 }

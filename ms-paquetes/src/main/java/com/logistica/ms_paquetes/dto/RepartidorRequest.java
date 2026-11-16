@@ -20,6 +20,10 @@ public record RepartidorRequest(
                  message = "El usuario debe tener entre 3 y 50 caracteres: letras, números, punto, guion y guion bajo")
         String username,
 
+        @NotBlank(message = "El subject de Keycloak es obligatorio")
+        @Size(max = 100, message = "El subject de Keycloak no puede superar 100 caracteres")
+        String keycloakSub,
+
         @NotNull(message = "La sucursal es obligatoria")
         Long sucursalId
 ) { }

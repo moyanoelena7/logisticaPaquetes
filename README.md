@@ -68,8 +68,9 @@ git clone <URL_DEL_REPOSITORIO>
 cd logistica-paquetes
 
 # 2. Crear el archivo de variables a partir de la plantilla
-Copy-Item .env.example .env
-# Abrí .env y completá los valores (ver tabla de variables)
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+# Si .env ya existe, no lo sobrescribas: conservá tus secretos y agregá solo variables faltantes.
+# En un .env nuevo, reemplazá los valores de ejemplo por tus credenciales locales.
 
 # 3. Construir y levantar todo
 docker compose up --build -d
@@ -89,8 +90,11 @@ La primera vez tarda varios minutos: se descargan las imágenes y cada servicio 
 | `DB_PASSWORD` | Contraseña de ese usuario |
 | `KC_ADMIN_USER` | Usuario administrador de la consola de Keycloak |
 | `KC_ADMIN_PASSWORD` | Contraseña de ese administrador |
+| `MS_PAQUETES_CLIENT_ID` | ID del cliente técnico de ms-logistica en Keycloak (`ms-logistica-service`) |
+| `MS_PAQUETES_CLIENT_SECRET` | Secret generado para ese cliente; se configura en `.env` por entorno y nunca se versiona |
+| `MS_PAQUETES_URL` | URL interna compartida por ms-logistica y el gateway dentro de Docker (`http://ms-paquetes:8081`) |
 
-El archivo `.env` **nunca se sube al repositorio** (está en `.gitignore`). Solo se versiona `.env.example`.
+`.env.example` es una plantilla versionada con valores ilustrativos; no se usa directamente como almacén de secretos. `.env` es tu archivo local con credenciales reales y **nunca se sube al repositorio**. En esta configuración, `MS_PAQUETES_URL` tiene el mismo valor para ms-logistica y el gateway. No pongas `localhost` allí: dentro de Docker, `localhost` apuntaría al propio contenedor.
 
 ### Modos de ejecución
 
@@ -144,6 +148,31 @@ La autenticación la resuelve **Keycloak** (realm `logistica`, client `logistica
 | `repartidor.logistica` | `repartidor123` | `REPARTIDOR` |
 
 Son usuarios de prueba para desarrollo. La consola de Keycloak está en http://localhost:8180 (credenciales `KC_ADMIN_USER` / `KC_ADMIN_PASSWORD` del `.env`).
+
+### Cuenta técnica ms-logistica → ms-paquetes
+
+El realm `logistica` define el rol técnico `MS-LOGISTICA` y el cliente confidencial `ms-logistica-service`. El cliente usa el flujo `client_credentials` y su cuenta de servicio recibe el rol `MS-LOGISTICA`; ms-paquetes usa ese rol en sus reglas de autorización para los endpoints internos.
+
+El cliente se declara sin un secret en `infra/keycloak/realm-logistica.json`. Keycloak genera el secret al crear el cliente. Para cada entorno, copiá el secret desde **Clients → ms-logistica-service → Credentials** y guardalo únicamente en el `.env` local:
+
+```dotenv
+MS_PAQUETES_CLIENT_ID=ms-logistica-service
+MS_PAQUETES_CLIENT_SECRET=PEGAR_SECRET_GENERADO_POR_KEYCLOAK
+```
+
+No incluyas el secret en el archivo de realm, en `docker-compose.yml` ni en Git. Docker Compose pasa estas variables a ms-logistica. En Docker, el endpoint de tokens debe usar `http://keycloak:8080/realms/logistica/protocol/openid-connect/token`; desde la PC de desarrollo se usa `http://localhost:8180/realms/logistica/protocol/openid-connect/token`.
+
+El contrato, flujo de reserva, autorización por `sub` y pendientes para el integrante de ms-logistica están en [docs/CONTEXTO_CONTINUACION_MS_LOGISTICA.md](docs/CONTEXTO_CONTINUACION_MS_LOGISTICA.md).
+
+**Instalación nueva:** al iniciar Keycloak con `--import-realm`, se crea el realm, el rol, el cliente y la asignación del rol a la cuenta de servicio desde `realm-logistica.json`. Luego se copia el secret generado a `.env`.
+
+**Realm existente:** reiniciar Keycloak no fusiona el archivo con un realm que ya existe; el importador omite ese realm para preservar su estado. En la consola de administración, seleccioná `logistica` y creá o actualizá el rol y el cliente, habilitá **Client authentication** y **Service accounts roles**, asigná el rol `MS-LOGISTICA` a la cuenta de servicio y guardá el secret del entorno en `.env`. Repetí la configuración del secret por separado en cada entorno.
+
+El cliente de servicio está configurado con `Full Scope Allowed` desactivado. En un realm existente, asigná expresamente el rol de realm `MS-LOGISTICA` a la cuenta de servicio; los roles predeterminados de Keycloak no conceden acceso a la API.
+
+### Sucursal central y paquetes existentes
+
+El campo `sector` indica la zona de destino (`CENTRAL`); `sucursalId` indica desde qué sucursal sale el paquete. Para registrar paquetes y reservar envíos, la sucursal debe estar activa y marcada como central. En la base de desarrollo revisada, `Sucursal Centro` (id `1`) ya quedó marcada como central. En otra instalación, consultá `GET /sucursales` y enviá `PUT /sucursales/{id}` con los datos actuales de esa sucursal y `"esCentral": true`; al marcar otra, la anterior deja de ser central. Los paquetes históricos no se mueven solos y deben revisarse antes de asignarlos a envíos nuevos.
 
 ### Obtener un token (PowerShell)
 
@@ -278,7 +307,7 @@ Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (Ma
 
 | Código | Cuándo |
 |---|---|
-| `400` | Datos inválidos o regla de capacidad incumplida |
+| `400` | Datos/formato inválidos |
 | `401` | Sin token o token inválido |
 | `403` | Sin el rol necesario |
 | `404` | Recurso inexistente |
@@ -293,7 +322,7 @@ Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (Ma
 - [x] Keycloak con realm, roles y usuarios de prueba
 - [x] Seguridad JWT por rol en gateway y microservicios
 - [x] Microservicios y gateway en Docker Compose
-- [ ] `ms-paquetes`: sucursales, clientes, vehículos, repartidores y paquetes
+- [x] `ms-paquetes`: entidades, API pública e integración interna de reserva implementadas; falta preparar los datos existentes de sucursal central y `sub` de repartidores
 - [ ] `ms-logistica`: envíos, asignaciones y resultados de entrega
 - [ ] OSRM en Docker Compose e integración de rutas
 - [ ] Colección de Postman con escenarios positivos y negativos
