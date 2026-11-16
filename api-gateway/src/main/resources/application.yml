@@ -12,7 +12,7 @@ spring:
             - id: ms-paquetes
               uri: ${MS_PAQUETES_URL:http://localhost:8081}
               predicates:
-                - Path=/paquetes/**, /vehiculos/**, /repartidores/**, /sucursales/**, /clientes/**
+                - Path=/paquetes/**, /vehiculos/**, /repartidores/**, /sucursales/**, /clientes, /clientes/**
             - id: ms-logistica
               uri: ${MS_LOGISTICA_URL:http://localhost:8082}
               predicates:
