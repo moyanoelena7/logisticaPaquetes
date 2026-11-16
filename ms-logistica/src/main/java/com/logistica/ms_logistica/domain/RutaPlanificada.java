@@ -31,7 +31,7 @@ public class RutaPlanificada {
     private BigDecimal duracionSegundos;
 
     @Lob
-    @Column(name = "geometria_geojson", nullable = false)
+    @Column(name = "geometria_geojson", nullable = false, columnDefinition = "LONGTEXT")
     private String geometriaGeojson;
 
     @Column(name = "fecha_calculo", nullable = false)

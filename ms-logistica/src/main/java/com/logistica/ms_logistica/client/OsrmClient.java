@@ -11,6 +11,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.logistica.ms_logistica.exception.CalculoRutaNoPosibleException;
 import com.logistica.ms_logistica.exception.RespuestaOsrmInvalidaException;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -38,6 +39,7 @@ public class OsrmClient {
                         .queryParam("geometries", "geojson")
                         .queryParam("steps", "false")
                         .build())
+                .header(HttpHeaders.ACCEPT_ENCODING, "identity")
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, response) -> {
                     try {
