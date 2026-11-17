@@ -1,10 +1,15 @@
 package com.logistica.ms_paquetes.domain.estado;
 
-import java.util.Set;
-final class EstadoEntregado implements EstadoPaqueteState {
+import com.logistica.ms_paquetes.domain.Paquete;
+
+public final class EstadoEntregado extends EstadoPaquete {
+    @Override
+    public String nombre() {
+        return "ENTREGADO";
+    }
 
     @Override
-    public Set<EstadoPaquete> transicionesPermitidas() {
-        return Set.of();
+    public EstadoPaquete entregar(Paquete paquete) {
+        return this;
     }
 }

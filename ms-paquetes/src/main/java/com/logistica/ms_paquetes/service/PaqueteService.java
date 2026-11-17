@@ -11,8 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.logistica.ms_paquetes.domain.Paquete;
 import com.logistica.ms_paquetes.domain.Sector;
 import com.logistica.ms_paquetes.domain.estado.EstadoPaquete;
-import com.logistica.ms_paquetes.domain.estado.EstadoPaqueteState;
-import com.logistica.ms_paquetes.domain.estado.EstadoPaqueteStateFactory;
 import com.logistica.ms_paquetes.dto.PaqueteRequest;
 import com.logistica.ms_paquetes.dto.PaqueteResponse;
 import com.logistica.ms_paquetes.dto.PaqueteLogisticaResponse;
@@ -90,10 +88,7 @@ public class PaqueteService {
         Paquete paquete = repository.bloquearPorId(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Paquete", id));
 
-        if (paquete.getEstado() != EstadoPaquete.PENDIENTE) {
-            throw new ReglaNegocioException(
-                    "Solo se pueden modificar los datos de un paquete en estado PENDIENTE");
-        }
+        paquete.validarEdicion();
 
         if (!paquete.getCliente().getId().equals(req.clienteId())) {
             paquete.setCliente(clienteService.buscar(req.clienteId()));
@@ -114,28 +109,32 @@ public class PaqueteService {
      * El estado destino no se aplica si el estado actual no lo permite.
      */
     @Transactional
-    public PaqueteResponse cambiarEstado(Long id, EstadoPaquete nuevo) {
+    public PaqueteResponse cambiarEstado(Long id, String nuevo) {
         Paquete paquete = repository.bloquearPorId(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Paquete", id));
 
         // Mismo estado: no-op idempotente, igual que desactivar().
-        if (paquete.getEstado() == nuevo) {
+        if (paquete.getEstado().nombre().equals(nuevo)) {
             return PaqueteResponse.from(paquete);
         }
 
-        EstadoPaqueteState actual = EstadoPaqueteStateFactory.obtener(paquete.getEstado());
-        if (!actual.permiteTransicionA(nuevo)) {
-            throw new ReglaNegocioException(
+        // Adaptador del contrato HTTP: selecciona la operación solicitada.
+        // El estado actual del paquete decide si esa operación es válida.
+        switch (nuevo) {
+            case "ASIGNADO" -> paquete.asignar();
+            case "EN_CAMINO" -> paquete.enCamino();
+            case "ENTREGADO" -> paquete.entregar();
+            case "INCIDENCIA" -> paquete.registrarIncidencia();
+            default -> throw new ReglaNegocioException(
                     "No se puede cambiar el estado del paquete " + id
                             + " de " + paquete.getEstado() + " a " + nuevo);
         }
 
-        paquete.setEstado(nuevo);
         return PaqueteResponse.from(paquete);
     }
 
     @Transactional
-    public PaqueteLogisticaResponse cambiarEstadoParaLogistica(Long id, EstadoPaquete nuevo) {
+    public PaqueteLogisticaResponse cambiarEstadoParaLogistica(Long id, String nuevo) {
         PaqueteResponse cambiado = cambiarEstado(id, nuevo);
         return obtenerParaLogistica(List.of(cambiado.id())).getFirst();
     }

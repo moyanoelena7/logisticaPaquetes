@@ -1,11 +1,25 @@
 package com.logistica.ms_paquetes.domain.estado;
 
-import java.util.Set;
+import com.logistica.ms_paquetes.domain.Paquete;
 
-final class EstadoPendiente implements EstadoPaqueteState {
+public final class EstadoPendiente extends EstadoPaquete {
+    @Override
+    public String nombre() {
+        return "PENDIENTE";
+    }
 
     @Override
-    public Set<EstadoPaquete> transicionesPermitidas() {
-        return Set.of(EstadoPaquete.ASIGNADO);
+    public EstadoPaquete asignar(Paquete paquete) {
+        return new EstadoAsignado();
+    }
+
+    @Override
+    public void validarEdicion() {
+        // Los datos del paquete pendiente pueden editarse.
+    }
+
+    @Override
+    public void validarReserva(Paquete paquete) {
+        // El paquete pendiente puede incluirse en una reserva.
     }
 }

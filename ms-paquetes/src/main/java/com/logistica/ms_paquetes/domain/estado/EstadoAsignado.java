@@ -1,12 +1,20 @@
 package com.logistica.ms_paquetes.domain.estado;
 
-import java.util.Set;
+import com.logistica.ms_paquetes.domain.Paquete;
 
-
-final class EstadoAsignado implements EstadoPaqueteState {
+public final class EstadoAsignado extends EstadoPaquete {
+    @Override
+    public String nombre() {
+        return "ASIGNADO";
+    }
 
     @Override
-    public Set<EstadoPaquete> transicionesPermitidas() {
-        return Set.of(EstadoPaquete.EN_CAMINO);
+    public EstadoPaquete asignar(Paquete paquete) {
+        return this;
+    }
+
+    @Override
+    public EstadoPaquete enCamino(Paquete paquete) {
+        return new EstadoEnCamino();
     }
 }

@@ -1,10 +1,11 @@
 package com.logistica.ms_paquetes.dto;
 
-import com.logistica.ms_paquetes.domain.estado.EstadoPaquete;
-
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 
 public record EstadoPaqueteRequest(
         @NotNull(message = "El estado es obligatorio")
-        EstadoPaquete estado
+        @Pattern(regexp = "PENDIENTE|ASIGNADO|EN_CAMINO|ENTREGADO|INCIDENCIA",
+                message = "El estado no es válido")
+        String estado
 ) { }

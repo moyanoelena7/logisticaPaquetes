@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.logistica.ms_paquetes.domain.Paquete;
-import com.logistica.ms_paquetes.domain.estado.EstadoPaquete;
 import com.logistica.ms_paquetes.domain.Repartidor;
 import com.logistica.ms_paquetes.domain.ReservaEnvio;
 import com.logistica.ms_paquetes.domain.Sector;
@@ -42,7 +41,6 @@ public class ReservaEnvioService {
     private final VehiculoRepository vehiculoRepository;
     private final RepartidorRepository repartidorRepository;
     private final SucursalService sucursalService;
-    private final PaqueteService paqueteService;
 
     @Transactional(readOnly = true)
     public List<VehiculoResponse> vehiculosDisponibles(Long sucursalId) {
@@ -140,7 +138,7 @@ public class ReservaEnvioService {
 
         reservaRepository.save(reserva);
         for (Paquete paquete : paquetes) {
-            paqueteService.cambiarEstado(paquete.getId(), EstadoPaquete.ASIGNADO);
+            paquete.asignar();
         }
 
         return ReservaEnvioResponse.from(reserva);
@@ -237,10 +235,7 @@ public class ReservaEnvioService {
                 throw new ReglaNegocioException(
                         "El paquete " + paquete.getId() + " no pertenece al sector indicado");
             }
-            if (paquete.getEstado() != EstadoPaquete.PENDIENTE) {
-                throw new ReglaNegocioException(
-                        "El paquete " + paquete.getId() + " no está en estado PENDIENTE");
-            }
+            paquete.validarReserva();
         }
     }
 

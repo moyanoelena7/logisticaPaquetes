@@ -5,7 +5,6 @@ import java.time.Instant;
 
 import com.logistica.ms_paquetes.domain.Paquete;
 import com.logistica.ms_paquetes.domain.Sector;
-import com.logistica.ms_paquetes.domain.estado.EstadoPaquete;
 
 public record PaqueteResponse(
         Long id,
@@ -19,7 +18,7 @@ public record PaqueteResponse(
         BigDecimal anchoCm,
         BigDecimal largoCm,
         BigDecimal pesoKg,
-        EstadoPaquete estado,
+        String estado,
         Instant fechaRegistro
 ) {
     public static PaqueteResponse from(Paquete p) {
@@ -35,7 +34,7 @@ public record PaqueteResponse(
                 p.getAnchoCm(),
                 p.getLargoCm(),
                 p.getPesoKg(),
-                p.getEstado(),
+                p.getEstado().nombre(),
                 p.getFechaRegistro()
         );
     }

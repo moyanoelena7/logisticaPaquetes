@@ -4,11 +4,14 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 import com.logistica.ms_paquetes.domain.estado.EstadoPaquete;
+import com.logistica.ms_paquetes.domain.estado.EstadoPendiente;
+import com.logistica.ms_paquetes.repository.EstadoPaqueteConverter;
 
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import lombok.AccessLevel;
 
 @Entity
 @Table(name = "paquete")
@@ -54,10 +57,35 @@ public class Paquete {
     @Column(name = "peso_kg", nullable = false, precision = 10, scale = 2)
     private BigDecimal pesoKg;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = EstadoPaqueteConverter.class)
     @Column(nullable = false, length = 20)
-    private EstadoPaquete estado = EstadoPaquete.PENDIENTE;
+    @Setter(AccessLevel.NONE)
+    private EstadoPaquete estado = new EstadoPendiente();
 
     @Column(name = "fecha_registro", nullable = false, updatable = false)
     private Instant fechaRegistro = Instant.now();
+
+    public void asignar() {
+        estado = estado.asignar(this);
+    }
+
+    public void enCamino() {
+        estado = estado.enCamino(this);
+    }
+
+    public void entregar() {
+        estado = estado.entregar(this);
+    }
+
+    public void registrarIncidencia() {
+        estado = estado.registrarIncidencia(this);
+    }
+
+    public void validarEdicion() {
+        estado.validarEdicion();
+    }
+
+    public void validarReserva() {
+        estado.validarReserva(this);
+    }
 }
