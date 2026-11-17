@@ -10,6 +10,9 @@
       { "name": "MS-LOGISTICA", "description": "Cuenta técnica de ms-logistica para consumir la API interna de ms-paquetes" }
     ]
   },
+  "scopeMappings": [
+    { "client": "ms-logistica-service", "roles": ["MS-LOGISTICA"] }
+  ],
   "clients": [
     {
       "clientId": "logistica-api",
