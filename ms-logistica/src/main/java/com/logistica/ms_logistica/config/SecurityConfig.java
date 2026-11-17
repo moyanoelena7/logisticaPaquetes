@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 
+import jakarta.servlet.DispatcherType;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -29,10 +31,17 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
             .authorizeHttpRequests(authorize -> authorize
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                 .requestMatchers("/actuator/health").permitAll()
 
                 .requestMatchers(HttpMethod.GET, "/envios")
                     .hasRole("ADMINISTRADOR")
+
+                .requestMatchers(HttpMethod.GET, "/envios/disponibilidad")
+                    .hasRole("ADMINISTRADOR")
+
+                .requestMatchers(HttpMethod.GET, "/envios/mias/rutas")
+                    .hasRole("REPARTIDOR")
 
                 .requestMatchers(HttpMethod.GET, "/envios/{id}/ruta")
                     .hasAnyRole("ADMINISTRADOR", "REPARTIDOR")
@@ -52,7 +61,8 @@ public class SecurityConfig {
                 .requestMatchers(
                     HttpMethod.PATCH,
                     "/envios/{id}/inicio",
-                    "/envios/{id}/paquetes/{paqueteId}/resultado"
+                    "/envios/{id}/paquetes/{paqueteId}/resultado",
+                    "/envios/{id}/cierre"
                 ).hasRole("REPARTIDOR")
 
                 .anyRequest().denyAll()

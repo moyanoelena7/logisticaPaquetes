@@ -29,7 +29,13 @@ public class PlanificacionRutaService {
     @Transactional
     public void guardarRuta(Long envioId, BigDecimal distanciaMetros, BigDecimal duracionSegundos,
                             String geometriaGeojson, Instant fechaCalculo, List<Long> paqueteIdsEnOrden) {
-        Envio envio = envioService.buscarParaActualizar(envioId, EstadoEnvio.ASIGNADO);
+        Envio envio = envioService.buscarParaActualizar(envioId);
+        if (envio.getEstado() == EstadoEnvio.PLANIFICADO && envio.getRuta() != null) {
+            return;
+        }
+        if (envio.getEstado() != EstadoEnvio.ASIGNADO) {
+            throw new IllegalStateException("La ruta solo se puede guardar para un envío ASIGNADO");
+        }
         Map<Long, EnvioPaquete> paquetesPorId = envio.getPaquetes().stream()
                 .collect(Collectors.toMap(EnvioPaquete::getPaqueteId, Function.identity()));
         if (paqueteIdsEnOrden == null || paqueteIdsEnOrden.size() != paquetesPorId.size()

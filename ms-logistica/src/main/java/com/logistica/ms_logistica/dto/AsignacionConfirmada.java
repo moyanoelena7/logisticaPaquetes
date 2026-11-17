@@ -2,9 +2,13 @@ package com.logistica.ms_logistica.dto;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 public record AsignacionConfirmada(
+        Long envioId,
+        boolean activa,
+        List<Long> paqueteIds,
         Long vehiculoId,
         Long repartidorId,
         String repartidorSub,

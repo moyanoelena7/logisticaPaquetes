@@ -9,13 +9,13 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 - La rama `feature/ms-logistica` incluye la seguridad JWT y el CRUD de `ms-paquetes` incorporado desde `main`.
 - ms-logistica usa Java 21, Spring Boot 4.1.2, Spring MVC, Spring Data JPA, MariaDB y OAuth2 Resource Server.
 - Existen MsLogisticaApplication y config/SecurityConfig.
-- En `ms-logistica` aún faltan entidades, repositorios, servicios, controladores y clientes HTTP. `ms-paquetes` ya permite cambiar el estado de un paquete individual. Queda pendiente la reserva conjunta de la carga y la flota.
+- Ambos microservicios están implementados en la rama de integración: paquetes conserva el contrato interno y logística implementa creación, asignación, planificación, reparto y cierre.
 - El catálogo de sectores de `ms-paquetes` tiene por ahora un único valor, `CENTRAL`.
 - application.yml define puerto 8082, conexión a bd_logistica, JWT, app.ms-paquetes.base-url y app.osrm.base-url.
 - Docker Compose configura MS_PAQUETES_URL=http://ms-paquetes:8081 y las URLs de issuer/JWKS.
-- OSRM se ejecuta como el servicio `osrm` de Docker Compose (imagen `ghcr.io/project-osrm/osrm-backend:v6.0.0`, algoritmo MLD) detrás del profile `osrm`. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`. Dentro de Docker, `OSRM_URL` es `http://osrm:5000`. Todavía no hay cliente HTTP ni lógica de rutas en el código de `ms-logistica`.
+- OSRM se ejecuta como el servicio `osrm` de Docker Compose (imagen `ghcr.io/project-osrm/osrm-backend:v6.0.0`, algoritmo MLD) detrás del profile `osrm`. Los datos se generan una vez por equipo con `ms-logistica/osrm/prepare.ps1`. Dentro de Docker, `OSRM_URL` es `http://osrm:5000`. El cliente HTTP usa Trip y guarda el orden calculado de las paradas.
 - El gateway enruta /envios/** a ms-logistica. En desarrollo se publican los puertos de gateway y microservicios.
-- `ms-logistica` y `ms-paquetes` tienen sus propias instancias MariaDB. Keycloak importa el realm desde el JSON y conserva su estado de desarrollo en un volumen propio.
+- paquetes-db aloja bd_paquetes; logistica-db aloja bd_logistica y bd_keycloak. Cada microservicio accede únicamente a su base.
 
 ## Rama y límites de responsabilidad
 
@@ -29,7 +29,7 @@ Handoff para desarrollar ms-logistica sobre la base de seguridad existente. Resu
 - Un envío agrupa entre 6 y 99 paquetes distintos de una sucursal y un sector. La composición existe desde `CREADO`. La asignación y la ruta se agregan en etapas posteriores.
 - `EnvioPaquete` guarda el destino y el resultado del intento. `ParadaRuta` guarda el orden de visita y referencia a `EnvioPaquete`.
 - El envío sigue `CREADO → ASIGNADO → PLANIFICADO → EN_CAMINO → PENDIENTE_RETORNO → CERRADO`. Puede cancelarse antes de iniciar. La flota queda reservada hasta que el repartidor confirma el retorno y la disponibilidad.
-- `ms-paquetes` mantiene los estados de los paquetes y las reservas. Su contrato interno está definido en la sección **Integración con ms-paquetes**; las reservas son atómicas y `ms-logistica` confirma su asignación local después de recibir `200 OK`.
+- `ms-paquetes` mantiene los estados de los paquetes y las reservas. `ms-logistica` usa el contrato interno HTTP para consultar, reservar/liberar y avanzar el estado de los paquetes.
 
 ## Modelo y persistencia
 
@@ -72,8 +72,10 @@ Mantener esta tabla alineada con docs/DECISIONS.md, los controladores y Security
 | POST | /envios/{id}/ruta | ADMINISTRADOR | Calcular y guardar ruta |
 | PATCH | /envios/{id}/inicio | REPARTIDOR | Iniciar reparto |
 | PATCH | /envios/{id}/paquetes/{paqueteId}/resultado | REPARTIDOR | Registrar resultado de entrega |
+| PATCH | /envios/{id}/cierre | REPARTIDOR | Confirmar retorno y liberar recursos |
 
 Los query parameters no forman parte del path que evalúa Spring Security; GET /envios cubre las consultas por sector o estado.
+Inicio y cierre no requieren cuerpo; las fechas se asignan en el servidor. El resultado usa `{"resultado":"ENTREGADO"}` o `{"resultado":"INCIDENCIA","motivoIncidencia":"..."}`. Las operaciones PATCH responden `204 No Content`. Repetir el mismo resultado y motivo es idempotente; enviar un resultado distinto para un paquete ya resuelto produce conflicto.
 
 ## Seguridad: preservar y completar
 
@@ -85,7 +87,7 @@ Las reglas ya configuradas son:
 - GET /envios: ADMINISTRADOR.
 - GET /envios/{id} y GET /envios/{id}/ruta: ADMINISTRADOR o REPARTIDOR.
 - POST de creación, asignación y cálculo de ruta: ADMINISTRADOR.
-- PATCH de inicio y resultado: REPARTIDOR.
+- PATCH de inicio, resultado y cierre: REPARTIDOR; el servicio comprueba que el `sub` corresponda al repartidor asignado.
 - Cualquier ruta no declarada queda denegada; cada endpoint nuevo necesita una regla explícita.
 - realm_access.roles se convierte a ROLE_ADMINISTRADOR y ROLE_REPARTIDOR.
 
@@ -103,26 +105,14 @@ Configurar el `RestClient` de `ms-paquetes` con `app.ms-paquetes.base-url` y una
 
 ## Integración con ms-paquetes
 
-ms-paquetes es el dueño de paquetes, vehículos, repartidores y de la reserva que protege esos recursos de asignaciones simultáneas. ms-logistica mantiene su envío y su asignación local, pero no escribe en la base de ms-paquetes.
+Antes de codificar el cliente, acordar DTOs y errores para:
 
-| Método | Endpoint interno | Uso |
-|---|---|---|
-| GET | `/interno/logistica/paquetes?ids=1,2,...` | Devuelve `id`, `sucursalId`, `sector` y `estado` para los IDs pedidos. |
-| PATCH | `/interno/logistica/paquetes/{id}/estado` | Aplica una transición de estado válida; responde `422` si la transición no está permitida. |
-| GET | `/interno/logistica/vehiculos/disponibles?sucursalId={id}` | Devuelve vehículos habilitados administrativamente y sin reserva activa en esa sucursal. |
-| GET | `/interno/logistica/repartidores/disponibles?sucursalId={id}` | Devuelve repartidores habilitados, con `sub` vinculado y sin reserva activa en esa sucursal. |
-| PUT | `/interno/logistica/envios/{envioId}/reserva` | Reserva atómicamente entre 6 y 99 paquetes distintos, un vehículo y un repartidor. |
-| DELETE | `/interno/logistica/envios/{envioId}/reserva` | Libera la reserva al cerrar el envío; repetirlo es seguro. |
+- Consultar paquetes, coordenadas, dimensiones y pesos por uno o varios IDs.
+- Consultar vehículos y repartidores disponibles.
+- Reservar/liberar recursos y actualizar el estado de los paquetes.
+- Manejar ID inexistente, estado no elegible, no disponibilidad y fallos del servicio.
 
-El cuerpo del PUT contiene `{ "sucursalId": 1, "sector": "CENTRAL", "paqueteIds": [1, 2, 3, 4, 5, 6], "vehiculoId": 1, "repartidorId": 1 }`. La respuesta `200 OK` incluye `envioId`, estado activo, IDs de recursos y paquetes, `repartidorSub`, peso y volumen totales, sucursal de origen y destinos con coordenadas. Un reintento del mismo `envioId` con los mismos datos devuelve la reserva existente; con datos distintos devuelve `409 Conflict`. ms-paquetes serializa llamadas simultáneas con el mismo `envioId` mediante una fila técnica de bloqueo y conserva la reserva como registro de idempotencia; no es una tabla de operaciones pendientes.
-
-Antes de reservar, ms-paquetes vuelve a validar sucursal, sector y estado `PENDIENTE`; bloquea las filas involucradas y verifica habilitación administrativa, reservas activas y capacidad de peso/volumen con `BigDecimal`. El volumen se calcula como `altoCm × anchoCm × largoCm ÷ 1.000.000`. La reserva activa se libera cuando ms-logistica cierra el envío. Los booleanos `disponible` de vehículo y repartidor siguen siendo la habilitación administrativa; la disponibilidad operativa requiere además que no haya reserva activa.
-
-Las operaciones internas requieren el rol de servicio `MS-LOGISTICA` y viven bajo `/interno/logistica/**`, prefijo que no está publicado por el gateway. El repartidor consulta destinos a través de ms-logistica; ms-logistica debe comprobar que el `sub` autenticado corresponde al repartidor asignado al envío antes de responder o registrar resultados.
-
-Los estados de paquete siguen `PENDIENTE → ASIGNADO → EN_CAMINO → ENTREGADO` o `INCIDENCIA`. La cuenta técnica cambia los estados por el endpoint interno; ms-logistica no debe reenviar el token del repartidor a ms-paquetes. La liberación de la reserva se solicita al cerrar el envío y no borra el historial ni retrocede los estados de los paquetes.
-
-Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a errores de aplicación claros. Configurar timeout. No repetir el PUT con datos cambiados; para completar un reintento posterior a un timeout, repetir el mismo `envioId` y exactamente los mismos datos. La llamada HTTP debe quedar fuera de la transacción local de ms-logistica.
+Usar DTOs propios; nunca compartir entidades JPA. Traducir errores remotos a errores de aplicación claros. Configurar timeout. Limitar reintentos a operaciones idempotentes, principalmente GET; el PATCH de estado de paquete es repetible si solicita el estado ya persistido, y la liberación de reserva por `envioId` también es idempotente.
 
 ## Integración OSRM
 
@@ -157,7 +147,7 @@ Usar SLF4J con el ID de envío y operación cuando corresponda. No registrar JWT
 - Dentro de Docker, ms-paquetes debe resolverse como http://ms-paquetes:8081.
 - Mantener KEYCLOAK_ISSUER_URI y KEYCLOAK_JWK_SET_URI de Compose.
 - `OSRM_URL` ya está configurada en Compose como `http://osrm:5000`; fuera de Docker el `application.yml` usa `http://localhost:5000` (puerto publicado en el override). El servicio `osrm` requiere `docker compose --profile osrm up -d` y los datos de `ms-logistica/osrm/prepare.ps1`.
-- Usar `bd_logistica` en `logistica-db:3306` dentro de Docker o `127.0.0.1:3308` desde el IDE. Configurar `LOGISTICA_DB_USER` y `LOGISTICA_DB_PASSWORD` con los valores del `.env` local.
+- Usar bd_logistica y credenciales inyectadas desde el .env local.
 - ddl-auto:update es una facilidad de desarrollo; acordar migraciones/validación de esquema antes de producción.
 - Actuator expone health e info, pero la seguridad actual solo permite health. Decidir si info queda restringido o se deja de exponer.
 - Compose espera a MariaDB, no a que ms-logistica esté saludable. Esperar el inicio completo o definir healthcheck/readiness como tarea de infraestructura.

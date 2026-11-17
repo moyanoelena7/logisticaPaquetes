@@ -15,9 +15,9 @@ Backend de una empresa de logística de última milla. Registra paquetes, admini
 | `api-gateway` | Punto de entrada único. Valida el token y enruta a los microservicios. | 8080 |
 | `ms-paquetes` | Paquetes, clientes, vehículos, repartidores y sucursales. | 8081 |
 | `ms-logistica` | Envíos, asignaciones, rutas (integración con OSRM) y resultados de entrega. | 8082 |
-| `paquetes-db` | Instancia MariaDB exclusiva de `ms-paquetes` con `bd_paquetes`. | 3306 |
-| `logistica-db` | Instancia MariaDB exclusiva de `ms-logistica` con `bd_logistica`. | 3306 |
-| `keycloak` | Autenticación y autorización (OAuth2 / OIDC, tokens JWT), con almacenamiento local de desarrollo. | 8080 |
+| `paquetes-db` | MariaDB para `bd_paquetes`. | 3306 |
+| `logistica-db` | MariaDB para `bd_logistica` y `bd_keycloak`. | 3306 |
+| `keycloak` | Autenticación y autorización (OAuth2 / OIDC, tokens JWT). | 8080 |
 | `osrm` | Cálculo de rutas con OSRM (distancias, duraciones y geometría). Solo con `--profile osrm`. | 5000 |
 
 Los diagramas (C4, ER y proceso principal) están en `docs/`.
@@ -31,9 +31,10 @@ logistica-paquetes/
 ├── ms-logistica/         Microservicio de envíos y rutas
 │   └── osrm/             preparación de datos (prepare.ps1) y datos de OSRM
 ├── infra/
-│   └── keycloak/         realm-logistica.json (configuración inicial del realm)
+│   ├── keycloak/         realm-logistica.json (se importa solo al arrancar)
+│   └── mariadb/logistica-init/     scripts SQL de inicialización
 ├── docs/                 documentación y diagramas
-├── postman/              colección y entorno de Postman (pendiente)
+├── postman/              colecciones y entorno de Postman
 ├── docker-compose.yml            configuración base
 ├── docker-compose.override.yml   solo desarrollo: publica puertos extra
 ├── .env.example                  plantilla de variables
@@ -68,11 +69,15 @@ git clone <URL_DEL_REPOSITORIO>
 cd logistica-paquetes
 
 # 2. Crear el archivo de variables a partir de la plantilla
-if (!(Test-Path .env)) { Copy-Item .env.example .env }
-# Si .env ya existe, no lo sobrescribas: conservá tus secretos y agregá solo variables faltantes.
-# En un .env nuevo, reemplazá los valores de ejemplo por tus credenciales locales.
+Copy-Item .env.example .env
+# Abrí .env y completá los valores (ver tabla de variables)
 
-# 3. Construir y levantar todo
+# 3. Arrancar primero Keycloak y las bases para obtener el secreto técnico
+docker compose up -d paquetes-db logistica-db keycloak
+# En Keycloak: Clients > ms-logistica-service > Credentials.
+# Copiar el secreto actual a MS_PAQUETES_CLIENT_SECRET en .env.
+
+# 4. Construir y levantar todo
 docker compose up --build -d
 
 # 4. Verificar
@@ -85,19 +90,15 @@ La primera vez tarda varios minutos: se descargan las imágenes y cada servicio 
 
 | Variable | Descripción |
 |---|---|
-| `PAQUETES_DB_ROOT_PASSWORD` | Contraseña de root en `paquetes-db` |
-| `PAQUETES_DB_USER` / `PAQUETES_DB_PASSWORD` | Credenciales de aplicación para `bd_paquetes` |
-| `LOGISTICA_DB_ROOT_PASSWORD` | Contraseña de root en `logistica-db` |
-| `LOGISTICA_DB_USER` / `LOGISTICA_DB_PASSWORD` | Credenciales de aplicación para `bd_logistica` |
+| `PAQUETES_DB_ROOT_PASSWORD` | Contraseña root de la MariaDB de paquetes |
+| `PAQUETES_DB_USER` / `PAQUETES_DB_PASSWORD` | Cuenta de `ms-paquetes` |
+| `LOGISTICA_DB_ROOT_PASSWORD` | Contraseña root de la MariaDB de logística |
+| `LOGISTICA_DB_USER` / `LOGISTICA_DB_PASSWORD` | Cuenta de `ms-logistica` y Keycloak |
 | `KC_ADMIN_USER` | Usuario administrador de la consola de Keycloak |
 | `KC_ADMIN_PASSWORD` | Contraseña de ese administrador |
-| `MS_PAQUETES_CLIENT_ID` | ID del cliente técnico de ms-logistica en Keycloak (`ms-logistica-service`) |
-| `MS_PAQUETES_CLIENT_SECRET` | Secret generado para ese cliente; se configura en `.env` por entorno y nunca se versiona |
-| `MS_PAQUETES_URL` | URL interna compartida por ms-logistica y el gateway dentro de Docker (`http://ms-paquetes:8081`) |
+| `MS_PAQUETES_CLIENT_SECRET` | Secret del cliente de servicio de ms-logistica en Keycloak |
 
-`.env.example` es una plantilla versionada con valores ilustrativos; no se usa directamente como almacén de secretos. `.env` es tu archivo local con credenciales reales y **nunca se sube al repositorio**. En esta configuración, `MS_PAQUETES_URL` tiene el mismo valor para ms-logistica y el gateway. No pongas `localhost` allí: dentro de Docker, `localhost` apuntaría al propio contenedor.
-
-Si ya usabas el MariaDB compartido, agregá a tu `.env` las seis variables nuevas de la plantilla y detené el contenedor anterior con `docker stop mariadb-db` si está ocupando el puerto `3307`. Las dos bases nuevas se inicializan vacías y el volumen anterior queda disponible para recuperar datos si los necesitás.
+El archivo `.env` **nunca se sube al repositorio** (está en `.gitignore`). Solo se versiona `.env.example`.
 
 ### Modos de ejecución
 
@@ -105,18 +106,18 @@ Si ya usabas el MariaDB compartido, agregá a tu `.env` las seis variables nueva
 # Desarrollo: usa docker-compose.yml + docker-compose.override.yml
 docker compose up --build -d
 
-# Sin los puertos del override de desarrollo
+# Solo el gateway expuesto (ignora el override)
 docker compose --file docker-compose.yml up --build -d
 ```
 
 | Servicio | URL en tu PC | Modo |
 |---|---|---|
-| API Gateway | http://localhost:8080 | solo desarrollo |
+| API Gateway | http://localhost:8080 | siempre |
 | ms-paquetes | http://localhost:8081 | solo desarrollo |
 | ms-logistica | http://localhost:8082 | solo desarrollo |
 | Keycloak | http://localhost:8180 | solo desarrollo |
-| `paquetes-db` | `127.0.0.1:3307` | solo desarrollo |
-| `logistica-db` | `127.0.0.1:3308` | solo desarrollo |
+| MariaDB de paquetes | localhost:3307 | solo desarrollo |
+| MariaDB de logística y Keycloak | localhost:3308 | solo desarrollo |
 | OSRM | http://localhost:5000 | solo desarrollo (`--profile osrm`) |
 
 ### Comandos útiles
@@ -133,7 +134,7 @@ docker compose --profile osrm up -d
 docker compose logs -f osrm
 ```
 
-Cada instancia MariaDB crea su base y usuario al inicializar su volumen. Keycloak importa el JSON cuando el realm `logistica` todavía no existe y guarda los cambios posteriores en `keycloak-data`. Editar el JSON de arranque no modifica un realm ya importado.
+> **Importante:** `infra/mariadb/logistica-init/` y el realm de Keycloak se aplican cuando el volumen está vacío. Para conservar los datos, no uses `docker compose down -v`; los cambios de inicialización requieren aplicar el SQL correspondiente o usar volúmenes de desarrollo nuevos.
 
 ### OSRM (cálculo de rutas)
 
@@ -179,31 +180,6 @@ La autenticación la resuelve **Keycloak** (realm `logistica`, client `logistica
 
 Son usuarios de prueba para desarrollo. La consola de Keycloak está en http://localhost:8180 (credenciales `KC_ADMIN_USER` / `KC_ADMIN_PASSWORD` del `.env`).
 
-### Cuenta técnica ms-logistica → ms-paquetes
-
-El realm `logistica` define el rol técnico `MS-LOGISTICA` y el cliente confidencial `ms-logistica-service`. El cliente usa el flujo `client_credentials` y su cuenta de servicio recibe el rol `MS-LOGISTICA`; ms-paquetes usa ese rol en sus reglas de autorización para los endpoints internos.
-
-El cliente se declara sin un secret en `infra/keycloak/realm-logistica.json`. Keycloak genera el secret al crear el cliente. Para cada entorno, copiá el secret desde **Clients → ms-logistica-service → Credentials** y guardalo únicamente en el `.env` local:
-
-```dotenv
-MS_PAQUETES_CLIENT_ID=ms-logistica-service
-MS_PAQUETES_CLIENT_SECRET=PEGAR_SECRET_GENERADO_POR_KEYCLOAK
-```
-
-No incluyas el secret en el archivo de realm, en `docker-compose.yml` ni en Git. Docker Compose pasa estas variables a ms-logistica. En Docker, el endpoint de tokens debe usar `http://keycloak:8080/realms/logistica/protocol/openid-connect/token`; desde la PC de desarrollo se usa `http://localhost:8180/realms/logistica/protocol/openid-connect/token`.
-
-El contrato, flujo de reserva, autorización por `sub` y pendientes para el integrante de ms-logistica están en [docs/CONTEXTO_CONTINUACION_MS_LOGISTICA.md](docs/CONTEXTO_CONTINUACION_MS_LOGISTICA.md).
-
-**Instalación nueva:** al iniciar Keycloak con `--import-realm`, se crea el realm, el rol, el cliente y la asignación del rol a la cuenta de servicio desde `realm-logistica.json`. Luego se copia el secret generado a `.env`.
-
-**Realm existente:** reiniciar Keycloak no fusiona el archivo con un realm que ya existe; el importador omite ese realm para preservar su estado. En la consola de administración, seleccioná `logistica` y creá o actualizá el rol y el cliente, habilitá **Client authentication** y **Service accounts roles**, asigná el rol `MS-LOGISTICA` a la cuenta de servicio y guardá el secret del entorno en `.env`. Repetí la configuración del secret por separado en cada entorno.
-
-El cliente de servicio está configurado con `Full Scope Allowed` desactivado. En un realm existente, asigná expresamente el rol de realm `MS-LOGISTICA` a la cuenta de servicio; los roles predeterminados de Keycloak no conceden acceso a la API.
-
-### Sucursal central y paquetes existentes
-
-El campo `sector` indica la zona de destino (`CENTRAL`); `sucursalId` indica desde qué sucursal sale el paquete. Para registrar paquetes y reservar envíos, la sucursal debe estar activa y marcada como central. En la base de desarrollo revisada, `Sucursal Centro` (id `1`) ya quedó marcada como central. En otra instalación, consultá `GET /sucursales` y enviá `PUT /sucursales/{id}` con los datos actuales de esa sucursal y `"esCentral": true`; al marcar otra, la anterior deja de ser central. Los paquetes históricos no se mueven solos y deben revisarse antes de asignarlos a envíos nuevos.
-
 ### Obtener un token (PowerShell)
 
 ```powershell
@@ -229,7 +205,7 @@ Los tokens duran unos 5 minutos. Si aparece un 401 de golpe, pedí uno nuevo.
 | Sin token, o token inválido o vencido | `401 Unauthorized` |
 | Token válido pero sin el rol requerido | `403 Forbidden` |
 
-**Regla del equipo:** cada endpoint nuevo debe agregarse a la lista de reglas del `ResourceServerConfig` de su servicio con el rol que corresponde según la tabla de APIs. Lo que no esté listado queda **denegado** (`anyRequest().denyAll()`): un endpoint sin regla responde `403` aunque el usuario esté autenticado. Si un endpoint nuevo da `403` con el rol correcto, lo primero que hay que revisar es que esté en esa lista.
+**Regla del equipo:** cada endpoint nuevo debe agregarse a la lista de reglas del `SecurityConfig` de su servicio con el rol que corresponde según la tabla de APIs. Lo que no esté listado queda **denegado** (`anyRequest().denyAll()`): un endpoint sin regla responde `403` aunque el usuario esté autenticado. Si un endpoint nuevo da `403` con el rol correcto, lo primero que hay que revisar es que esté en esa lista.
 
 ---
 
@@ -300,18 +276,16 @@ git merge origin/main
 Para iterar rápido, dejá la infraestructura en Docker y corré solo tu servicio desde la terminal o el IDE:
 
 ```powershell
-docker compose up -d paquetes-db keycloak
-docker compose stop ms-paquetes          # liberar el puerto de la aplicación
+docker compose up -d paquetes-db logistica-db keycloak
+docker compose stop ms-paquetes          # liberar el puerto (o ms-logistica)
 
 cd ms-paquetes
-$env:PAQUETES_DB_USER = "<valor de tu .env>"
-$env:PAQUETES_DB_PASSWORD = "<valor de tu .env>"
+${env:PAQUETES_DB_USER} = "<PAQUETES_DB_USER>"
+${env:PAQUETES_DB_PASSWORD} = "<PAQUETES_DB_PASSWORD>"
 .\mvnw.cmd spring-boot:run
 ```
 
-Para `ms-logistica`, levantá `logistica-db` y `keycloak`, detené el contenedor `ms-logistica` si está en ejecución, y usá `LOGISTICA_DB_USER` y `LOGISTICA_DB_PASSWORD` en su módulo. En ambos casos, configurá esas variables también en el IDE si arrancás desde ahí.
-
-Los valores por defecto son `127.0.0.1:3307` para `bd_paquetes`, `127.0.0.1:3308` para `bd_logistica` y `localhost:8180` para Keycloak. Probá directo contra la aplicación que levantaste en `http://localhost:8081` o `http://localhost:8082`, ya que el gateway de Docker enruta a los contenedores. Antes de abrir un PR verificá que también funcione dentro de Docker con `docker compose up --build -d <servicio>`.
+Los valores por defecto de `ms-paquetes` apuntan a `localhost:3307`; los de `ms-logistica`, a `localhost:3308`. Keycloak está en `localhost:8180`. Mientras corras así, probá **directo contra `http://localhost:8081`** (o `8082`), porque el gateway de Docker enruta a los contenedores. Antes de abrir un PR verificá que también funcione dentro de Docker con `docker compose up --build -d <servicio>`.
 
 ---
 
@@ -339,7 +313,7 @@ Los valores por defecto son `127.0.0.1:3307` para `bd_paquetes`, `127.0.0.1:3308
 
 | Código | Cuándo |
 |---|---|
-| `400` | Datos/formato inválidos |
+| `400` | Datos inválidos o regla de capacidad incumplida |
 | `401` | Sin token o token inválido |
 | `403` | Sin el rol necesario |
 | `404` | Recurso inexistente |
@@ -350,14 +324,14 @@ Los valores por defecto son `127.0.0.1:3307` para `bd_paquetes`, `127.0.0.1:3308
 ## Estado del proyecto
 
 - [x] Estructura del monorepo
-- [x] Una instancia MariaDB y un volumen por microservicio de aplicación
+- [x] MariaDB con las bases `bd_paquetes`, `bd_logistica` y `bd_keycloak`
 - [x] Keycloak con realm, roles y usuarios de prueba
 - [x] Seguridad JWT por rol en gateway y microservicios
 - [x] Microservicios y gateway en Docker Compose
-- [x] `ms-paquetes`: entidades, API pública e integración interna de reserva implementadas; falta preparar los datos existentes de sucursal central y `sub` de repartidores
-- [ ] `ms-logistica`: envíos, asignaciones y resultados de entrega
+- [x] `ms-paquetes`: sucursales, clientes, vehículos, repartidores y paquetes
+- [x] `ms-logistica`: envíos, asignaciones y resultados de entrega
 - [x] OSRM en Docker Compose (perfil `osrm`, datos de Córdoba preparados con `prepare.ps1`)
-- [ ] Colección de Postman con escenarios positivos y negativos
+- [x] Colección de Postman con escenarios positivos y negativos
 - [ ] Documentación final (secciones 02 a 11 del enunciado)
 
 ---
@@ -368,11 +342,19 @@ Los valores por defecto son `127.0.0.1:3307` para `bd_paquetes`, `127.0.0.1:3308
 |---|---|
 | `docker` no se reconoce como comando | Abrir Docker Desktop, esperar a que inicie y abrir una terminal nueva |
 | Keycloak no responde al principio | Esperar 1 a 3 minutos y revisar `docker compose logs keycloak` |
-| Error de acceso a la base (`Access denied`) | Verificar las variables `PAQUETES_DB_*` o `LOGISTICA_DB_*` contra las credenciales con las que se inicializó el volumen. Editar `.env` no cambia los usuarios de una instancia ya creada. |
-| Los cambios del JSON del realm no se aplican | Actualizar el realm existente desde la consola de Keycloak. El JSON se usa para importar un realm que todavía no existe. |
+| Error de acceso a la base (`Access denied`) | Verificar las credenciales `PAQUETES_DB_*` y `LOGISTICA_DB_*` contra el volumen ya inicializado |
+| Los cambios en el realm o en SQL de inicialización no se aplican | Solo se ejecutan con volumen vacío; aplicar manualmente el cambio o usar un volumen de desarrollo nuevo, sin borrar datos existentes |
 | 401 con un token que parecía válido | El token venció (5 minutos): pedir uno nuevo |
 | Un servicio da 404 en todas las rutas del gateway | Revisar las rutas en `api-gateway/src/main/resources/application.yml` |
 | Puerto ocupado al correr un servicio desde el IDE | Detener el contenedor correspondiente con `docker compose stop <servicio>` |
 | `osrm` termina apenas arranca | Faltan los datos de mapa: correr `ms-logistica\osrm\prepare.ps1` y volver a levantarlo |
 | OSRM responde `NoSegment` | Las coordenadas están invertidas: OSRM espera `longitud,latitud` |
 | `osrm` no aparece en `docker compose ps` | Está detrás del profile: usar `docker compose --profile osrm up -d` |
+
+## Presentación integrada
+
+Construir ambos microservicios desde esta rama integrada. Importar los JSON de postman/ y seleccionar el entorno actualizado. Configurar las credenciales locales y obtener ambos tokens de usuario. La cuenta técnica se usa aparte para diagnosticar el contrato interno.
+
+Ejecutar la carpeta 01 una sola vez. La creación de otra central desmarca la anterior: todos los paquetes y recursos del envío deben pertenecer a la central vigente. El script del token del repartidor guarda su subject en repartidor_sub; no usar el token completo como keycloakSub.
+
+Ejecutar 03 en orden. La colección interna modifica estados y reservas, por lo que debe usar datos distintos. Los tokens vencen: renovar el correspondiente sin pegar tokens fijos en los requests. Antes de presentar desde main, reconstruir las imágenes integradas y repetir el flujo con seis paquetes nuevos.

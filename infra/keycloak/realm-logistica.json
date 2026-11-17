@@ -7,9 +7,12 @@
     "realm": [
       { "name": "ADMINISTRADOR", "description": "Gestiona paquetes, flota, envios y rutas" },
       { "name": "REPARTIDOR", "description": "Consulta rutas asignadas y registra entregas" },
-      { "name": "MS-LOGISTICA", "description": "Cuenta técnica de ms-logistica para consumir endpoints internos de ms-paquetes" }
+      { "name": "MS-LOGISTICA", "description": "Cuenta técnica de ms-logistica para consumir la API interna de ms-paquetes" }
     ]
   },
+  "scopeMappings": [
+    { "client": "ms-logistica-service", "roles": ["MS-LOGISTICA"] }
+  ],
   "clients": [
     {
       "clientId": "logistica-api",
