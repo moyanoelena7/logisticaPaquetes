@@ -1,0 +1,322 @@
+{
+  "info": {
+    "_postman_id": "a700d5fd-e7ae-4bf9-88f3-f4a0a46d6aa3",
+    "name": "Contrato Interno ms-paquetes para ms-logistica",
+    "description": "Colección separada para probar el contrato interno. Sus solicitudes cambian estados y reservas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Autenticación y Salud",
+      "item": [
+        {
+          "name": "Health - API Gateway (8080)",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Health - ms-paquetes (8081)",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_paquetes_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Health - ms-logistica (8082)",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_logistica_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Token - Administrador (admin.logistica)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('admin_token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "logistica-api"
+                },
+                {
+                  "key": "username",
+                  "value": "{{admin_username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{admin_password}}"
+                }
+              ]
+            },
+            "url": "{{keycloak_token_url}}"
+          }
+        },
+        {
+          "name": "Token - Repartidor (repartidor.logistica + extrae sub)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('repartidor_token', json.access_token);",
+                  "const payload = JSON.parse(atob(json.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.environment.set('repartidor_sub', payload.sub);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "logistica-api"
+                },
+                {
+                  "key": "username",
+                  "value": "{{repartidor_username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{repartidor_password}}"
+                }
+              ]
+            },
+            "url": "{{keycloak_token_url}}"
+          }
+        },
+        {
+          "name": "Token - Cuenta Tecnica (ms-logistica-service)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('service_token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{ms_paquetes_client_id}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{ms_paquetes_client_secret}}"
+                }
+              ]
+            },
+            "url": "{{keycloak_token_url}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Contrato Interno ms-paquetes (opcional, ejecutar por separado)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{service_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "02.1 Consultar Paquetes por IDs",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_paquetes_url}}/interno/logistica/paquetes?ids={{id_paquete_1}},{{id_paquete_2}},{{id_paquete_3}},{{id_paquete_4}},{{id_paquete_5}},{{id_paquete_6}}"
+          }
+        },
+        {
+          "name": "02.2 Consultar Vehiculos Disponibles Operativamente",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_paquetes_url}}/interno/logistica/vehiculos/disponibles?sucursalId={{id_sucursal}}"
+          }
+        },
+        {
+          "name": "02.3 Consultar Repartidores Disponibles Operativamente",
+          "request": {
+            "method": "GET",
+            "url": "{{ms_paquetes_url}}/interno/logistica/repartidores/disponibles?sucursalId={{id_sucursal}}"
+          }
+        },
+        {
+          "name": "02.4 Reservar Envio (PUT Atomico -> pasa paquetes a ASIGNADO)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Reserva activa', () => pm.expect(json.activa).to.eql(true));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sucursalId\": {{id_sucursal}},\n  \"sector\": \"CENTRAL\",\n  \"paqueteIds\": [\n    {{id_paquete_1}},\n    {{id_paquete_2}},\n    {{id_paquete_3}},\n    {{id_paquete_4}},\n    {{id_paquete_5}},\n    {{id_paquete_6}}\n  ],\n  \"vehiculoId\": {{id_vehiculo_grande}},\n  \"repartidorId\": {{id_repartidor}}\n}"
+            },
+            "url": "{{ms_paquetes_url}}/interno/logistica/envios/{{id_envio}}/reserva"
+          }
+        },
+        {
+          "name": "02.5 Idempotencia - Repetir misma Reserva (debe devolver 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Idempotencia 200', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sucursalId\": {{id_sucursal}},\n  \"sector\": \"CENTRAL\",\n  \"paqueteIds\": [\n    {{id_paquete_1}},\n    {{id_paquete_2}},\n    {{id_paquete_3}},\n    {{id_paquete_4}},\n    {{id_paquete_5}},\n    {{id_paquete_6}}\n  ],\n  \"vehiculoId\": {{id_vehiculo_grande}},\n  \"repartidorId\": {{id_repartidor}}\n}"
+            },
+            "url": "{{ms_paquetes_url}}/interno/logistica/envios/{{id_envio}}/reserva"
+          }
+        },
+        {
+          "name": "02.6 Avanzar Estado Paquete 1 a EN_CAMINO",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_CAMINO\"\n}"
+            },
+            "url": "{{ms_paquetes_url}}/interno/logistica/paquetes/{{id_paquete_1}}/estado"
+          }
+        },
+        {
+          "name": "02.7 Avanzar Estado Paquete 1 a ENTREGADO",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            },
+            "url": "{{ms_paquetes_url}}/interno/logistica/paquetes/{{id_paquete_1}}/estado"
+          }
+        },
+        {
+          "name": "02.8 Liberar Reserva al Cerrar Envio (DELETE -> 204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "url": "{{ms_paquetes_url}}/interno/logistica/envios/{{id_envio}}/reserva"
+          }
+        }
+      ],
+      "description": "Estas solicitudes modifican estados y reservas directamente. No las ejecutes junto con el flujo principal 03 para evitar desincronizar ms-logistica y ms-paquetes."
+    }
+  ]
+}

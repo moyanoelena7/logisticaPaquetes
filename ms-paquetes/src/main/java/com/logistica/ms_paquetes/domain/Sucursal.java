@@ -31,4 +31,7 @@ public class Sucursal {
 
     @Column(nullable = false)
     private boolean activo = true;
+
+    @Column(name = "es_central", nullable = false)
+    private boolean esCentral;
 }

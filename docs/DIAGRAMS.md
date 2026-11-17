@@ -1,62 +1,40 @@
 ## Diagrama BPMN
 
-1. Recepción y Registro: Llegada de paquete a la sucursal, el administrador ingresa dimensiones, peso, cliente y dirección. El sistema asigna sector y ID.
-2. Agrupación y Control de Lote: El paquete queda en estado PENDIENTE. El sistema evalúa si el sector alcanzó la cantidad mínima.
-3. Validación de Recursos y Capacidad: Se busca vehículo y repartidor. Se valida que el volumen y peso del lote no excedan la capacidad máxima.
-4. Optimización de la Ruta: El motor de cálculo de OSRM toma las direcciones del lote y genera la secuencia óptima de paradas.
-5. Viaje y despacho: El repartidor inicia la hoja de ruta. El estado del envío cambia a EN_CAMINO.
-6. Ejecución y Registro de Entrega: El repartidor entrega el paquete al cliente o registra la imposibilidad de entrega (ausente/dirección errónea) y queda como pendiente.
+1. El administrador registra el paquete en `ms-paquetes` con su sucursal, cliente, dimensiones, peso y destino. El paquete queda `PENDIENTE`.
+2. El administrador selecciona entre 6 y 99 paquetes pendientes distintos de la misma sucursal y sector. `ms-logistica` guarda el envío como `CREADO`.
+3. El administrador elige vehículo y repartidor. `ms-paquetes` comprueba que sean de la sucursal, estén disponibles y que la carga respete ambos límites del vehículo. Al confirmar la reserva de paquetes y flota, `ms-logistica` pasa el envío a `ASIGNADO`.
+4. OSRM Trip recibe las coordenadas de la sucursal y de todos los destinos. Devuelve el recorrido abierto, desde la sucursal hasta la última entrega que elige Trip. `ms-logistica` guarda la ruta y pasa el envío a `PLANIFICADO`.
+5. El repartidor asignado inicia el reparto. El envío y sus paquetes pasan a `EN_CAMINO`. Cada intento se registra como `ENTREGADO` o `INCIDENCIA`, con motivo en caso de incidencia.
+6. El último intento deja el envío en `PENDIENTE_RETORNO`. Cuando el repartidor confirma que volvió a la sucursal y está disponible, se liberan el vehículo y el repartidor y el envío queda `CERRADO`. El administrador puede reprogramar los paquetes con incidencia de ese envío.
+
+El administrador puede cancelar el envío antes de iniciar el reparto. Si tiene reserva, se libera la flota y los paquetes vuelven a `PENDIENTE`.
 
 ```mermaid
 flowchart TD
-    subgraph Operación ["Administrador"]
-        A([Inicio: Paquete llega a sucursal]) --> B[Ingresar peso, dimensiones, cliente y dirección]
-    end
-
-
-    subgraph S_Envios ["Servicio de Envíos y Tracking"]
-        B --> C[Generar ID único y asignar a Sector]
-        C --> D[Estado: PENDIENTE]
-        D --> E{¿Sector reúne >= 6 paquetes?}
-        E -- No --> F[Mantener en espera de lote]
-        E -- Sí --> G[Crear Lote de Envío]
-    end
-
-
-    subgraph S_Flota ["Servicio de Flota y Recursos"]
-        G --> H{¿Vehículo y Repartidor disponibles?}
-        H -- No --> I[Alerta: Recurso no disponible]
-        H -- Sí --> J{¿Peso y volumen <= Capacidad Vehículo?}
-        J -- No --> K[Dividir lote / Reasignar vehículo]
-        J -- Sí --> L[Asignar Vehículo y Repartidor al Envío]
-    end
-
-
-    subgraph S_Rutas ["Servicio de Optimización de Rutas"]
-        L --> M[Calcular matriz de distancias y tiempos]
-        M --> N[Generar secuencia óptima incluyendo TODAS las paradas]
-    end
-
-
-    subgraph Repartidor ["Repartidor"]
-        N --> O[Cargar paquetes en vehículo]
-        O --> P[Cambiar estado a EN_TRANSITO]
-        P --> Q[Navegar según orden de paradas asignado]
-        Q --> R{¿Entrega exitosa en domicilio?}
-        R -- No --> S[Registrar INCIDENCIA / Cliente ausente]
-        R -- Sí --> T[Registrar confirmación de entrega]
-    end
-
-
-    subgraph Cierre ["Resultado del Proceso"]
-        S --> V([Estado Final: REPROGRAMADO / RETORNO])
-        T --> U([Estado Final: ENTREGADO])
-    end
-
-
-    style A fill:#4CAF50,stroke:#333,stroke-width:2px,color:#fff
-    style U fill:#2196F3,stroke:#333,stroke-width:2px,color:#fff
-    style V fill:#FF9800,stroke:#333,stroke-width:2px,color:#fff
+    A(["El paquete llega a la sucursal"]) --> B["Administrador registra el paquete en ms-paquetes"]
+    B --> C["Paquete PENDIENTE"]
+    C --> D["Administrador selecciona paquetes de la misma sucursal y sector"]
+    D --> E{"¿Entre 6 y 99 paquetes pendientes distintos?"}
+    E -- No --> F["Revisar la selección"] --> D
+    E -- Sí --> G["ms-logistica guarda el envío como CREADO"]
+    G --> H["Administrador elige vehículo y repartidor"]
+    H --> I{"¿Paquetes y flota disponibles y carga dentro de los límites?"}
+    I -- No --> J["Informar el motivo del rechazo de la reserva"]
+    I -- Sí --> K["ms-paquetes reserva los paquetes y la flota"]
+    K --> L["ms-logistica confirma el envío ASIGNADO"]
+    L --> M["OSRM Trip calcula el recorrido abierto desde la sucursal"]
+    M --> N["ms-logistica guarda la ruta y pasa a PLANIFICADO"]
+    N --> O["Repartidor inicia el envío y pasa a EN_CAMINO"]
+    O --> P{"¿Se entregó el paquete?"}
+    P -- Sí --> Q["Registrar ENTREGADO"]
+    P -- No --> R["Registrar INCIDENCIA con motivo"]
+    Q --> S{"¿Quedan entregas por intentar?"}
+    R --> S
+    S -- Sí --> P
+    S -- No --> T["Envío PENDIENTE_RETORNO"]
+    T --> U["Repartidor confirma regreso y disponibilidad"]
+    U --> V(["Liberar flota y confirmar envío CERRADO"])
+    V -. Incidencia .-> W["Administrador puede devolver el paquete a PENDIENTE"]
 ```
 
 ## Arquitectura Persistencia
@@ -122,26 +100,44 @@ CLIENTE ||--o{ PAQUETE : "solicita"
         bigint sucursal_id FK
         string nombre
         string telefono
+        string username UK
         boolean disponible
     }
 ```
 
 ### Diagrama entidad relación de microservicio logística
 
+Modelo previsto para `ms-logistica`. `sucursal_id`, `paquete_id`, `vehiculo_id` y `repartidor_id` son referencias externas a `ms-paquetes`.
+
 ```mermaid
- erDiagram
-    ENVIO ||--|| ASIGNACION : "posee"
-    ENVIO ||--|| RUTA_PLANIFICADA : "genera"
+erDiagram
+    ENVIO ||--|{ ENVIO_PAQUETE : "incluye"
+    ENVIO ||--o| ASIGNACION : "posee"
+    ENVIO ||--o| RUTA_PLANIFICADA : "genera"
     RUTA_PLANIFICADA ||--|{ PARADA_RUTA : "contiene"
+    ENVIO_PAQUETE ||--o| PARADA_RUTA : "se visita en"
 
 
     ENVIO {
         bigint id PK
+        bigint sucursal_id
         string sector
         string estado
         timestamp fecha_creacion
         timestamp fecha_inicio
         timestamp fecha_fin
+    }
+
+    ENVIO_PAQUETE {
+        bigint id PK
+        bigint envio_id FK
+        bigint paquete_id
+        string direccion_destino
+        decimal latitud_destino
+        decimal longitud_destino
+        string resultado
+        timestamp fecha_intento
+        string motivo_incidencia
     }
 
 
@@ -150,8 +146,11 @@ CLIENTE ||--o{ PAQUETE : "solicita"
         bigint envio_id FK, UK
         bigint vehiculo_id
         bigint repartidor_id
+        string repartidor_sub
         decimal peso_total_kg
         decimal volumen_total_m3
+        decimal latitud_salida
+        decimal longitud_salida
         timestamp fecha_asignacion
     }
 
@@ -159,9 +158,9 @@ CLIENTE ||--o{ PAQUETE : "solicita"
     RUTA_PLANIFICADA {
         bigint id PK
         bigint envio_id FK, UK
-        decimal distancia_total_km
-        decimal tiempo_estimado_min
-        text geometria_osrm
+        decimal distancia_metros
+        decimal duracion_segundos
+        text geometria_geojson
         timestamp fecha_calculo
     }
 
@@ -169,12 +168,7 @@ CLIENTE ||--o{ PAQUETE : "solicita"
     PARADA_RUTA {
         bigint id PK
         bigint ruta_id FK
-        bigint paquete_id
+        bigint envio_paquete_id FK, UK
         int orden_visita
-        decimal latitud_destino
-        decimal longitud_destino
-        string estado_entrega
-        timestamp fecha_intento
-        string observacion_incidencia
     }
 ```

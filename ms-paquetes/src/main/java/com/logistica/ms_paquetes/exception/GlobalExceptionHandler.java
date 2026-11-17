@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -23,6 +24,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> reglaNegocio(ReglaNegocioException ex) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(ErrorResponse.of(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), List.of()));
+    }
+
+    @ExceptionHandler(ConflictoReservaException.class)
+    public ResponseEntity<ErrorResponse> conflictoReserva(ConflictoReservaException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(HttpStatus.CONFLICT, ex.getMessage(), List.of()));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> conflictoPersistencia(DataIntegrityViolationException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(HttpStatus.CONFLICT,
+                        "El recurso entra en conflicto con datos existentes", List.of()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

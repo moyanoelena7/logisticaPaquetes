@@ -28,5 +28,8 @@ public record SucursalRequest(
         @DecimalMin(value = "-180.0", message = "La longitud debe estar entre -180 y 180")
         @DecimalMax(value = "180.0", message = "La longitud debe estar entre -180 y 180")
         @Digits(integer = 3, fraction = 7, message = "La longitud admite hasta 7 decimales")
-        BigDecimal longitud
+        BigDecimal longitud,
+
+        @NotNull(message = "Debe indicar si la sucursal es la central")
+        Boolean esCentral
 ) { }

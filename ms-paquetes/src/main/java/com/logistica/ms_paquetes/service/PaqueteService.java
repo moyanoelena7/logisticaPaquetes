@@ -1,6 +1,9 @@
 package com.logistica.ms_paquetes.service;
 
 import java.util.List;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +15,7 @@ import com.logistica.ms_paquetes.domain.estado.EstadoPaqueteState;
 import com.logistica.ms_paquetes.domain.estado.EstadoPaqueteStateFactory;
 import com.logistica.ms_paquetes.dto.PaqueteRequest;
 import com.logistica.ms_paquetes.dto.PaqueteResponse;
+import com.logistica.ms_paquetes.dto.PaqueteLogisticaResponse;
 import com.logistica.ms_paquetes.exception.RecursoNoEncontradoException;
 import com.logistica.ms_paquetes.exception.ReglaNegocioException;
 import com.logistica.ms_paquetes.repository.PaqueteRepository;
@@ -30,7 +34,7 @@ public class PaqueteService {
     public PaqueteResponse crear(PaqueteRequest req) {
         Paquete paquete = new Paquete();
         paquete.setCliente(clienteService.buscar(req.clienteId()));
-        paquete.setSucursal(sucursalService.obtenerAsignable(req.sucursalId()));
+        paquete.setSucursal(sucursalService.obtenerCentralAsignable(req.sucursalId()));
         // sector, estado y fechaRegistro los inicializa la entidad:
         // CENTRAL, PENDIENTE y el instante actual.
         aplicar(paquete, req);
@@ -57,16 +61,48 @@ public class PaqueteService {
         return PaqueteResponse.from(buscar(id));
     }
 
+    @Transactional(readOnly = true)
+    public List<PaqueteLogisticaResponse> obtenerParaLogistica(Collection<Long> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 99) {
+            throw new ReglaNegocioException("Debe indicar entre 1 y 99 IDs de paquetes");
+        }
+        Set<Long> idsUnicos = new HashSet<>(ids);
+        if (idsUnicos.size() != ids.size()) {
+            throw new ReglaNegocioException("La lista de paquetes no debe contener IDs duplicados");
+        }
+
+        List<Paquete> paquetes = repository.findAllById(idsUnicos);
+        if (paquetes.size() != idsUnicos.size()) {
+            Set<Long> encontrados = paquetes.stream().map(Paquete::getId)
+                    .collect(java.util.stream.Collectors.toSet());
+            Long faltante = ids.stream().filter(id -> !encontrados.contains(id)).findFirst().orElse(null);
+            throw new RecursoNoEncontradoException("Paquete", faltante);
+        }
+
+        return paquetes.stream()
+                .sorted(java.util.Comparator.comparing(Paquete::getId))
+                .map(PaqueteLogisticaResponse::from)
+                .toList();
+    }
+
     @Transactional
     public PaqueteResponse actualizar(Long id, PaqueteRequest req) {
-        Paquete paquete = buscar(id);
+        Paquete paquete = repository.bloquearPorId(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Paquete", id));
+
+        if (paquete.getEstado() != EstadoPaquete.PENDIENTE) {
+            throw new ReglaNegocioException(
+                    "Solo se pueden modificar los datos de un paquete en estado PENDIENTE");
+        }
 
         if (!paquete.getCliente().getId().equals(req.clienteId())) {
             paquete.setCliente(clienteService.buscar(req.clienteId()));
         }
         // Solo se valida la sucursal si el paquete cambia de sucursal.
         if (!paquete.getSucursal().getId().equals(req.sucursalId())) {
-            paquete.setSucursal(sucursalService.obtenerAsignable(req.sucursalId()));
+            paquete.setSucursal(sucursalService.obtenerCentralAsignable(req.sucursalId()));
+        } else {
+            sucursalService.obtenerCentralAsignable(req.sucursalId());
         }
 
         aplicar(paquete, req);
@@ -79,7 +115,8 @@ public class PaqueteService {
      */
     @Transactional
     public PaqueteResponse cambiarEstado(Long id, EstadoPaquete nuevo) {
-        Paquete paquete = buscar(id);
+        Paquete paquete = repository.bloquearPorId(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Paquete", id));
 
         // Mismo estado: no-op idempotente, igual que desactivar().
         if (paquete.getEstado() == nuevo) {
@@ -95,6 +132,12 @@ public class PaqueteService {
 
         paquete.setEstado(nuevo);
         return PaqueteResponse.from(paquete);
+    }
+
+    @Transactional
+    public PaqueteLogisticaResponse cambiarEstadoParaLogistica(Long id, EstadoPaquete nuevo) {
+        PaqueteResponse cambiado = cambiarEstado(id, nuevo);
+        return obtenerParaLogistica(List.of(cambiado.id())).getFirst();
     }
 
     private Paquete buscar(Long id) {

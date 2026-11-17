@@ -15,9 +15,10 @@ Backend de una empresa de logística de última milla. Registra paquetes, admini
 | `api-gateway` | Punto de entrada único. Valida el token y enruta a los microservicios. | 8080 |
 | `ms-paquetes` | Paquetes, clientes, vehículos, repartidores y sucursales. | 8081 |
 | `ms-logistica` | Envíos, asignaciones, rutas (integración con OSRM) y resultados de entrega. | 8082 |
-| `mariadb-db` | MariaDB con tres bases lógicas: `bd_paquetes`, `bd_logistica` y `bd_keycloak`. | 3306 |
+| `paquetes-db` | MariaDB para `bd_paquetes`. | 3306 |
+| `logistica-db` | MariaDB para `bd_logistica` y `bd_keycloak`. | 3306 |
 | `keycloak` | Autenticación y autorización (OAuth2 / OIDC, tokens JWT). | 8080 |
-| `osrm` | Cálculo de rutas. **Pendiente** (lo incorpora quien desarrolla `ms-logistica`). | — |
+| `osrm` | Cálculo de rutas con OSRM (distancias, duraciones y geometría). Solo con `--profile osrm`. | 5000 |
 
 Los diagramas (C4, ER y proceso principal) están en `docs/`.
 
@@ -28,12 +29,12 @@ logistica-paquetes/
 ├── api-gateway/          Spring Cloud Gateway (reactivo)
 ├── ms-paquetes/          Microservicio de paquetes y flota
 ├── ms-logistica/         Microservicio de envíos y rutas
+│   └── osrm/             preparación de datos (prepare.ps1) y datos de OSRM
 ├── infra/
 │   ├── keycloak/         realm-logistica.json (se importa solo al arrancar)
-│   ├── mariadb/init/     scripts SQL de inicialización
-│   └── osrm/             datos y notas de OSRM
+│   └── mariadb/logistica-init/     scripts SQL de inicialización
 ├── docs/                 documentación y diagramas
-├── postman/              colección y entorno de Postman (pendiente)
+├── postman/              colecciones y entorno de Postman
 ├── docker-compose.yml            configuración base
 ├── docker-compose.override.yml   solo desarrollo: publica puertos extra
 ├── .env.example                  plantilla de variables
@@ -71,7 +72,12 @@ cd logistica-paquetes
 Copy-Item .env.example .env
 # Abrí .env y completá los valores (ver tabla de variables)
 
-# 3. Construir y levantar todo
+# 3. Arrancar primero Keycloak y las bases para obtener el secreto técnico
+docker compose up -d paquetes-db logistica-db keycloak
+# En Keycloak: Clients > ms-logistica-service > Credentials.
+# Copiar el secreto actual a MS_PAQUETES_CLIENT_SECRET en .env.
+
+# 4. Construir y levantar todo
 docker compose up --build -d
 
 # 4. Verificar
@@ -84,11 +90,13 @@ La primera vez tarda varios minutos: se descargan las imágenes y cada servicio 
 
 | Variable | Descripción |
 |---|---|
-| `MARIADB_ROOT_PASSWORD` | Contraseña del usuario root de MariaDB |
-| `DB_USER` | Usuario de base de datos que usan los servicios (ej. `logistica_app`). **Debe coincidir con el usuario del script `infra/mariadb/init/01-crear-bases.sql`** |
-| `DB_PASSWORD` | Contraseña de ese usuario |
+| `PAQUETES_DB_ROOT_PASSWORD` | Contraseña root de la MariaDB de paquetes |
+| `PAQUETES_DB_USER` / `PAQUETES_DB_PASSWORD` | Cuenta de `ms-paquetes` |
+| `LOGISTICA_DB_ROOT_PASSWORD` | Contraseña root de la MariaDB de logística |
+| `LOGISTICA_DB_USER` / `LOGISTICA_DB_PASSWORD` | Cuenta de `ms-logistica` y Keycloak |
 | `KC_ADMIN_USER` | Usuario administrador de la consola de Keycloak |
 | `KC_ADMIN_PASSWORD` | Contraseña de ese administrador |
+| `MS_PAQUETES_CLIENT_SECRET` | Secret del cliente de servicio de ms-logistica en Keycloak |
 
 El archivo `.env` **nunca se sube al repositorio** (está en `.gitignore`). Solo se versiona `.env.example`.
 
@@ -108,7 +116,9 @@ docker compose --file docker-compose.yml up --build -d
 | ms-paquetes | http://localhost:8081 | solo desarrollo |
 | ms-logistica | http://localhost:8082 | solo desarrollo |
 | Keycloak | http://localhost:8180 | solo desarrollo |
-| MariaDB | localhost:3307 | solo desarrollo |
+| MariaDB de paquetes | localhost:3307 | solo desarrollo |
+| MariaDB de logística y Keycloak | localhost:3308 | solo desarrollo |
+| OSRM | http://localhost:5000 | solo desarrollo (`--profile osrm`) |
 
 ### Comandos útiles
 
@@ -117,10 +127,35 @@ docker compose ps                         # estado de los contenedores
 docker compose logs -f ms-paquetes        # logs de un servicio
 docker compose up --build -d ms-paquetes  # reconstruir solo un servicio
 docker compose down                       # detener todo (conserva los datos)
-docker compose down -v                    # detener y BORRAR volúmenes (bases y realm)
+
+# OSRM: preparar datos (una sola vez) y levantar el servicio
+cd ms-logistica\osrm; .\prepare.ps1; cd ..\..
+docker compose --profile osrm up -d
+docker compose logs -f osrm
 ```
 
-> **Importante:** los scripts de `infra/mariadb/init/` y el realm de Keycloak solo se aplican cuando el volumen está vacío. Si cambiás alguno de esos archivos, ejecutá `docker compose down -v` y volvé a levantar.
+> **Importante:** `infra/mariadb/logistica-init/` y el realm de Keycloak se aplican cuando el volumen está vacío. Para conservar los datos, no uses `docker compose down -v`; los cambios de inicialización requieren aplicar el SQL correspondiente o usar volúmenes de desarrollo nuevos.
+
+### OSRM (cálculo de rutas)
+
+OSRM corre como el servicio `osrm` con la imagen oficial `ghcr.io/project-osrm/osrm-backend:v6.0.0` y algoritmo MLD. **No se instala nada**: los comandos de preprocesamiento se ejecutan dentro de esa misma imagen.
+
+| Paso | Comando | Cuándo |
+|---|---|---|
+| 1. Preparar datos | `ms-logistica\osrm\prepare.ps1` | una vez por equipo, o al actualizar el mapa |
+| 2. Levantar OSRM | `docker compose --profile osrm up -d` | cada vez que se necesite ruteo |
+
+`prepare.ps1` descarga el extracto de OSM de la provincia de Córdoba (~40 MB) y genera `cordoba.osrm*` en `ms-logistica/osrm/data/` (~200 MB). Esos archivos **no se versionan**.
+
+El servicio está detrás del profile `osrm` a propósito: `docker compose up` sigue funcionando en máquinas donde todavía no se descargó el mapa. `ms-logistica` recibe `OSRM_URL=http://osrm:5000` y, si OSRM no está arriba, el cálculo de ruta falla de forma controlada.
+
+Probarlo:
+
+```powershell
+# las coordenadas son longitud,latitud (al revés que en los mapas)
+curl.exe "http://localhost:5000/nearest/v1/driving/-64.1833,-31.4167"
+curl.exe "http://localhost:5000/route/v1/driving/-64.1833,-31.4167;-64.1955,-31.4200?overview=full&geometries=geojson"
+```
 
 ### Comprobar que todo funciona
 
@@ -170,7 +205,7 @@ Los tokens duran unos 5 minutos. Si aparece un 401 de golpe, pedí uno nuevo.
 | Sin token, o token inválido o vencido | `401 Unauthorized` |
 | Token válido pero sin el rol requerido | `403 Forbidden` |
 
-**Regla del equipo:** cada endpoint nuevo debe agregarse a la lista de reglas del `ResourceServerConfig` de su servicio con el rol que corresponde según la tabla de APIs. Lo que no esté listado queda **denegado** (`anyRequest().denyAll()`): un endpoint sin regla responde `403` aunque el usuario esté autenticado. Si un endpoint nuevo da `403` con el rol correcto, lo primero que hay que revisar es que esté en esa lista.
+**Regla del equipo:** cada endpoint nuevo debe agregarse a la lista de reglas del `SecurityConfig` de su servicio con el rol que corresponde según la tabla de APIs. Lo que no esté listado queda **denegado** (`anyRequest().denyAll()`): un endpoint sin regla responde `403` aunque el usuario esté autenticado. Si un endpoint nuevo da `403` con el rol correcto, lo primero que hay que revisar es que esté en esa lista.
 
 ---
 
@@ -241,16 +276,16 @@ git merge origin/main
 Para iterar rápido, dejá la infraestructura en Docker y corré solo tu servicio desde la terminal o el IDE:
 
 ```powershell
-docker compose up -d mariadb-db keycloak
+docker compose up -d paquetes-db logistica-db keycloak
 docker compose stop ms-paquetes          # liberar el puerto (o ms-logistica)
 
 cd ms-paquetes
-$env:DB_USER = "<valor de tu .env>"
-$env:DB_PASSWORD = "<valor de tu .env>"
+${env:PAQUETES_DB_USER} = "<PAQUETES_DB_USER>"
+${env:PAQUETES_DB_PASSWORD} = "<PAQUETES_DB_PASSWORD>"
 .\mvnw.cmd spring-boot:run
 ```
 
-Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (MariaDB) y `localhost:8180` (Keycloak). Mientras corras así, probá **directo contra `http://localhost:8081`** (o `8082`), porque el gateway de Docker enruta a los contenedores. Antes de abrir un PR verificá que también funcione dentro de Docker con `docker compose up --build -d <servicio>`.
+Los valores por defecto de `ms-paquetes` apuntan a `localhost:3307`; los de `ms-logistica`, a `localhost:3308`. Keycloak está en `localhost:8180`. Mientras corras así, probá **directo contra `http://localhost:8081`** (o `8082`), porque el gateway de Docker enruta a los contenedores. Antes de abrir un PR verificá que también funcione dentro de Docker con `docker compose up --build -d <servicio>`.
 
 ---
 
@@ -293,10 +328,10 @@ Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (Ma
 - [x] Keycloak con realm, roles y usuarios de prueba
 - [x] Seguridad JWT por rol en gateway y microservicios
 - [x] Microservicios y gateway en Docker Compose
-- [ ] `ms-paquetes`: sucursales, clientes, vehículos, repartidores y paquetes
-- [ ] `ms-logistica`: envíos, asignaciones y resultados de entrega
-- [ ] OSRM en Docker Compose e integración de rutas
-- [ ] Colección de Postman con escenarios positivos y negativos
+- [x] `ms-paquetes`: sucursales, clientes, vehículos, repartidores y paquetes
+- [x] `ms-logistica`: envíos, asignaciones y resultados de entrega
+- [x] OSRM en Docker Compose (perfil `osrm`, datos de Córdoba preparados con `prepare.ps1`)
+- [x] Colección de Postman con escenarios positivos y negativos
 - [ ] Documentación final (secciones 02 a 11 del enunciado)
 
 ---
@@ -307,8 +342,19 @@ Los valores por defecto de cada `application.yml` apuntan a `localhost:3307` (Ma
 |---|---|
 | `docker` no se reconoce como comando | Abrir Docker Desktop, esperar a que inicie y abrir una terminal nueva |
 | Keycloak no responde al principio | Esperar 1 a 3 minutos y revisar `docker compose logs keycloak` |
-| Error de acceso a la base (`Access denied`) | Verificar que `DB_USER` y `DB_PASSWORD` del `.env` coinciden con lo creado; si cambiaste algo, `docker compose down -v` |
-| Los cambios en el realm o en el SQL no se aplican | Solo corren con volumen vacío: `docker compose down -v` y levantar de nuevo |
+| Error de acceso a la base (`Access denied`) | Verificar las credenciales `PAQUETES_DB_*` y `LOGISTICA_DB_*` contra el volumen ya inicializado |
+| Los cambios en el realm o en SQL de inicialización no se aplican | Solo se ejecutan con volumen vacío; aplicar manualmente el cambio o usar un volumen de desarrollo nuevo, sin borrar datos existentes |
 | 401 con un token que parecía válido | El token venció (5 minutos): pedir uno nuevo |
 | Un servicio da 404 en todas las rutas del gateway | Revisar las rutas en `api-gateway/src/main/resources/application.yml` |
 | Puerto ocupado al correr un servicio desde el IDE | Detener el contenedor correspondiente con `docker compose stop <servicio>` |
+| `osrm` termina apenas arranca | Faltan los datos de mapa: correr `ms-logistica\osrm\prepare.ps1` y volver a levantarlo |
+| OSRM responde `NoSegment` | Las coordenadas están invertidas: OSRM espera `longitud,latitud` |
+| `osrm` no aparece en `docker compose ps` | Está detrás del profile: usar `docker compose --profile osrm up -d` |
+
+## Presentación integrada
+
+Construir ambos microservicios desde esta rama integrada. Importar los JSON de postman/ y seleccionar el entorno actualizado. Configurar las credenciales locales y obtener ambos tokens de usuario. La cuenta técnica se usa aparte para diagnosticar el contrato interno.
+
+Ejecutar la carpeta 01 una sola vez. La creación de otra central desmarca la anterior: todos los paquetes y recursos del envío deben pertenecer a la central vigente. El script del token del repartidor guarda su subject en repartidor_sub; no usar el token completo como keycloakSub.
+
+Ejecutar 03 en orden. La colección interna modifica estados y reservas, por lo que debe usar datos distintos. Los tokens vencen: renovar el correspondiente sin pegar tokens fijos en los requests. Antes de presentar desde main, reconstruir las imágenes integradas y repetir el flujo con seis paquetes nuevos.

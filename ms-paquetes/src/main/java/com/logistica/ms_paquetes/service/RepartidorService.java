@@ -24,12 +24,16 @@ public class RepartidorService {
     @Transactional
     public RepartidorResponse crear(RepartidorRequest req) {
         String username = normalizar(req.username());
+        String keycloakSub = req.keycloakSub().trim();
         if (repository.existsByUsernameIgnoreCase(username)) {
             throw new ReglaNegocioException("Ya existe un repartidor con el usuario " + username);
         }
+        if (repository.existsByKeycloakSub(keycloakSub)) {
+            throw new ReglaNegocioException("Ya existe un repartidor vinculado al subject de Keycloak " + keycloakSub);
+        }
         Repartidor repartidor = new Repartidor();
         repartidor.setSucursal(sucursalService.obtenerAsignable(req.sucursalId()));
-        aplicar(repartidor, req, username);
+        aplicar(repartidor, req, username, keycloakSub);
         return RepartidorResponse.from(repository.save(repartidor));
     }
 
@@ -50,14 +54,18 @@ public class RepartidorService {
     public RepartidorResponse actualizar(Long id, RepartidorRequest req) {
         Repartidor repartidor = buscar(id);
         String username = normalizar(req.username());
+        String keycloakSub = req.keycloakSub().trim();
         if (repository.existsByUsernameIgnoreCaseAndIdNot(username, id)) {
             throw new ReglaNegocioException("Ya existe otro repartidor con el usuario " + username);
+        }
+        if (repository.existsByKeycloakSubAndIdNot(keycloakSub, id)) {
+            throw new ReglaNegocioException("El subject de Keycloak ya está vinculado a otro repartidor");
         }
         // Solo se valida la sucursal si el repartidor cambia de sucursal.
         if (!repartidor.getSucursal().getId().equals(req.sucursalId())) {
             repartidor.setSucursal(sucursalService.obtenerAsignable(req.sucursalId()));
         }
-        aplicar(repartidor, req, username);
+        aplicar(repartidor, req, username, keycloakSub);
         return RepartidorResponse.from(repartidor);
     }
 
@@ -73,10 +81,11 @@ public class RepartidorService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Repartidor", id));
     }
 
-    private void aplicar(Repartidor r, RepartidorRequest req, String username) {
+    private void aplicar(Repartidor r, RepartidorRequest req, String username, String keycloakSub) {
         r.setNombre(req.nombre().trim());
         r.setTelefono(vacioANull(req.telefono()));
         r.setUsername(username);
+        r.setKeycloakSub(keycloakSub);
     }
 
     private String normalizar(String username) {

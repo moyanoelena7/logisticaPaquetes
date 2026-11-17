@@ -1,18 +1,37 @@
 services:
-  mariadb-db:
+  paquetes-db:
     image: mariadb:11.8
-    container_name: mariadb-db
     restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${PAQUETES_DB_ROOT_PASSWORD}
       MARIADB_DATABASE: bd_paquetes
-      MARIADB_USER: ${DB_USER}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_USER: ${PAQUETES_DB_USER}
+      MARIADB_PASSWORD: ${PAQUETES_DB_PASSWORD}
     volumes:
-      - mariadb-logistica-data:/var/lib/mysql
-      - ./infra/mariadb/init:/docker-entrypoint-initdb.d:ro
+      - paquetes-db-data:/var/lib/mysql
     networks:
-      - logistica-net
+      - paquetes-db-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  logistica-db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MARIADB_ROOT_PASSWORD: ${LOGISTICA_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: bd_logistica
+      MARIADB_USER: ${LOGISTICA_DB_USER}
+      MARIADB_PASSWORD: ${LOGISTICA_DB_PASSWORD}
+    volumes:
+      - logistica-db-data:/var/lib/mysql
+      - ./infra/mariadb/logistica-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - logistica-db-net
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -28,16 +47,19 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
       KC_DB: mariadb
-      KC_DB_URL: jdbc:mariadb://mariadb-db:3306/bd_keycloak
-      KC_DB_USERNAME: ${DB_USER}
-      KC_DB_PASSWORD: ${DB_PASSWORD}
+      KC_DB_URL: jdbc:mariadb://logistica-db:3306/bd_keycloak
+      KC_DB_USERNAME: ${LOGISTICA_DB_USER}
+      KC_DB_PASSWORD: ${LOGISTICA_DB_PASSWORD}
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     volumes:
       - ./infra/keycloak:/opt/keycloak/data/import:ro
     depends_on:
-      mariadb-db:
+      logistica-db:
         condition: service_healthy
     networks:
       - logistica-net
+      - logistica-db-net
 
   ms-paquetes:
     build:
@@ -46,17 +68,18 @@ services:
     container_name: ms-paquetes
     restart: unless-stopped
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb-db:3306/bd_paquetes
-      SPRING_DATASOURCE_USERNAME: ${DB_USER}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mariadb://paquetes-db:3306/bd_paquetes
+      SPRING_DATASOURCE_USERNAME: ${PAQUETES_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PAQUETES_DB_PASSWORD}
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.mariadb.jdbc.Driver
       KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
     depends_on:
-      mariadb-db:
+      paquetes-db:
         condition: service_healthy
     networks:
       - logistica-net
+      - paquetes-db-net
 
   ms-logistica:
     build:
@@ -65,18 +88,42 @@ services:
     container_name: ms-logistica
     restart: unless-stopped
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb-db:3306/bd_logistica
-      SPRING_DATASOURCE_USERNAME: ${DB_USER}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mariadb://logistica-db:3306/bd_logistica
+      SPRING_DATASOURCE_USERNAME: ${LOGISTICA_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${LOGISTICA_DB_PASSWORD}
       MS_PAQUETES_URL: http://ms-paquetes:8081
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.mariadb.jdbc.Driver
       KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/logistica
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/certs
+      KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/logistica/protocol/openid-connect/token
+      MS_PAQUETES_CLIENT_ID: ${MS_PAQUETES_CLIENT_ID:-ms-logistica-service}
+      MS_PAQUETES_CLIENT_SECRET: ${MS_PAQUETES_CLIENT_SECRET:?Falta MS_PAQUETES_CLIENT_SECRET en .env}
+      OSRM_URL: http://osrm:5000
     depends_on:
-      mariadb-db:
+      logistica-db:
         condition: service_healthy
       ms-paquetes:
         condition: service_started
+      keycloak:
+        condition: service_started
+      osrm:
+        condition: service_started
+        required: false
+    networks:
+      - logistica-net
+      - logistica-db-net
+
+  # Cálculo de rutas. Requiere los datos generados con ms-logistica/osrm/prepare.ps1
+  # y se levanta solo con --profile osrm, para que `docker compose up` siga
+  # funcionando en equipos que no tienen el mapa descargado.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    container_name: osrm
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld /data/cordoba.osrm
+    volumes:
+      - ./ms-logistica/osrm/data:/data
+    profiles: ["osrm"]
     networks:
       - logistica-net
 
@@ -102,5 +149,11 @@ networks:
   logistica-net:
     driver: bridge
 
+  paquetes-db-net:
+    driver: bridge
+  logistica-db-net:
+    driver: bridge
+
 volumes:
-  mariadb-logistica-data:
+  paquetes-db-data:
+  logistica-db-data:

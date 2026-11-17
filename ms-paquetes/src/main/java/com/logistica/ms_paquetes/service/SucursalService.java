@@ -21,6 +21,9 @@ public class SucursalService {
     public SucursalResponse crear(SucursalRequest req) {
         Sucursal sucursal = new Sucursal();
         aplicar(sucursal, req);
+        if (Boolean.TRUE.equals(req.esCentral())) {
+            desmarcarCentralesExistentes();
+        }
         return SucursalResponse.from(repository.save(sucursal));
     }
 
@@ -37,6 +40,13 @@ public class SucursalService {
     @Transactional
     public SucursalResponse actualizar(Long id, SucursalRequest req) {
         Sucursal sucursal = buscar(id);
+        if (sucursal.isEsCentral() && !Boolean.TRUE.equals(req.esCentral())) {
+            throw new ReglaNegocioException(
+                    "Para cambiar la sucursal central, marque otra sucursal como central primero");
+        }
+        if (Boolean.TRUE.equals(req.esCentral())) {
+            desmarcarCentralesExistentes();
+        }
         aplicar(sucursal, req);
         return SucursalResponse.from(sucursal);
     }
@@ -44,6 +54,9 @@ public class SucursalService {
     @Transactional
     public SucursalResponse desactivar(Long id) {
         Sucursal sucursal = buscar(id);
+        if (sucursal.isEsCentral()) {
+            throw new ReglaNegocioException("No se puede desactivar la sucursal central");
+        }
         sucursal.setActivo(false);   // idempotente: desactivar dos veces no es un error
         return SucursalResponse.from(sucursal);
     }
@@ -60,6 +73,7 @@ public class SucursalService {
         s.setDireccion(req.direccion().trim());
         s.setLatitud(req.latitud());
         s.setLongitud(req.longitud());
+        s.setEsCentral(Boolean.TRUE.equals(req.esCentral()));
     }
     /** Para entidades que referencian una sucursal desde el cuerpo de la petición: 422 si no sirve. */
     @Transactional(readOnly = true)
@@ -71,5 +85,22 @@ public class SucursalService {
             throw new ReglaNegocioException("La sucursal con id " + sucursalId + " está desactivada");
         }
         return sucursal;
+    }
+
+    /** Comprueba que el origen indicado sea la sucursal central operativa. */
+    @Transactional(readOnly = true)
+    public Sucursal obtenerCentralAsignable(Long sucursalId) {
+        Sucursal sucursal = obtenerAsignable(sucursalId);
+        if (!sucursal.isEsCentral()) {
+            throw new ReglaNegocioException(
+                    "La sucursal con id " + sucursalId + " no está marcada como central");
+        }
+        return sucursal;
+    }
+
+    private void desmarcarCentralesExistentes() {
+        repository.findAll().stream()
+                .filter(Sucursal::isEsCentral)
+                .forEach(sucursal -> sucursal.setEsCentral(false));
     }
 }
